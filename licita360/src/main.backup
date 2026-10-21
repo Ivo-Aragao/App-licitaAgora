@@ -1,0 +1,4055 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createRoot } from 'react-dom/client';
+import {
+  Activity, AlertCircle, ArrowRight, ArrowUpRight, Bell,
+  BriefcaseBusiness, CalendarClock, Check, CheckCheck, CheckCircle2,
+  ChevronDown, ChevronRight, CircleHelp, ClipboardCheck, Clock3,
+  CloudDownload, FileCheck2, FileSearch, FileText, Filter, FolderOpen,
+  LayoutDashboard, ListTodo, BellRing, Building2, Mail, Play, Save, Users, 
+  LoaderCircle, Menu, Plus, Radar, Search,
+  Settings2, ShieldCheck, Sparkles, Target, Upload, Wallet, X,
+} from 'lucide-react';
+import './styles.css';
+
+const STORAGE_KEY = 'licita360-v1';
+
+const todayISO = () => {
+  const date = new Date();
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const fmtBRL = (value) => new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+  maximumFractionDigits: 2,
+}).format(Number(value || 0));
+
+const parseDate = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+
+  const text = String(value);
+  const match = text.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/
+  );
+
+  if (match) {
+    const date = new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4] || 0),
+      Number(match[5] || 0),
+      Number(match[6] || 0),
+    );
+
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatDate = (value) => {
+  const date = parseDate(value);
+  if (!date) return 'A definir';
+
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+};
+
+const toDateTimeLocalValue = (value) => {
+  const date = parseDate(value);
+  if (!date) return '';
+
+  const adjusted = new Date(
+    date.getTime() - date.getTimezoneOffset() * 60000
+  );
+
+  return adjusted.toISOString().slice(0, 16);
+};
+
+const initialData = {
+  opportunities: [
+    {
+      id: 'op-101',
+      title: 'Aquisição de materiais de expediente',
+      category: 'Material de escritório',
+      agency: 'Prefeitura Municipal de Fortaleza',
+      location: 'CE',
+      modality: 'Pregão eletrônico',
+      amount: 84500,
+      expectedRevenue: null,
+      estimatedCost: null,
+      taxPercent: 0,
+      deadline: '2026-10-22T14:00:00',
+      status: 'Em análise',
+      source: 'Demonstração',
+      url: '',
+      tasks: [
+        { id: 't1', title: 'Revisar exigências técnicas', done: true },
+        { id: 't2', title: 'Solicitar cotação a fornecedores', done: false },
+        { id: 't3', title: 'Conferir certidões', done: false },
+      ],
+    },
+    {
+      id: 'op-102',
+      title: 'Serviços de manutenção predial',
+      category: 'Prestação de serviços',
+      agency: 'Secretaria de Administração',
+      location: 'CE',
+      modality: 'Concorrência eletrônica',
+      amount: 275000,
+      expectedRevenue: null,
+      estimatedCost: null,
+      taxPercent: 0,
+      deadline: '2026-10-25T09:00:00',
+      status: 'Documentação',
+      source: 'Demonstração',
+      url: '',
+      tasks: [
+        { id: 't4', title: 'Conferir atestado técnico', done: false },
+        { id: 't5', title: 'Analisar planilha de custos', done: true },
+      ],
+    },
+    {
+      id: 'op-103',
+      title: 'Equipamentos de informática',
+      category: 'Tecnologia',
+      agency: 'Instituto Federal — unidade regional',
+      location: 'PE',
+      modality: 'Pregão eletrônico',
+      amount: 132800,
+      expectedRevenue: null,
+      estimatedCost: null,
+      taxPercent: 0,
+      deadline: '2026-10-28T10:00:00',
+      status: 'Preparar proposta',
+      source: 'Demonstração',
+      url: '',
+      tasks: [
+        { id: 't6', title: 'Cotação de equipamentos', done: true },
+        { id: 't7', title: 'Validar garantia mínima', done: false },
+      ],
+    },
+    {
+      id: 'op-104',
+      title: 'Fornecimento de gêneros alimentícios',
+      category: 'Alimentos',
+      agency: 'Consórcio Público Regional',
+      location: 'PB',
+      modality: 'Pregão eletrônico',
+      amount: 196400,
+      expectedRevenue: null,
+      estimatedCost: null,
+      taxPercent: 0,
+      deadline: '2026-11-03T08:30:00',
+      status: 'Monitorar',
+      source: 'Demonstração',
+      url: '',
+      tasks: [
+        { id: 't8', title: 'Verificar locais de entrega', done: false },
+      ],
+    },
+  ],
+
+  tasks: [
+    {
+      id: 'task-1',
+      title: 'Revisar edital de materiais de expediente',
+      date: '2026-10-16',
+      priority: 'Alta',
+      done: false,
+      linked: 'op-101',
+    },
+    {
+      id: 'task-2',
+      title: 'Pedir nova cotação de frete',
+      date: '2026-10-16',
+      priority: 'Média',
+      done: false,
+      linked: 'op-102',
+    },
+    {
+      id: 'task-3',
+      title: 'Atualizar certidão estadual',
+      date: '2026-10-19',
+      priority: 'Alta',
+      done: false,
+      linked: '',
+    },
+    {
+      id: 'task-4',
+      title: 'Conferir documentação da proposta de TI',
+      date: '2026-10-20',
+      priority: 'Baixa',
+      done: true,
+      linked: 'op-103',
+    },
+  ],
+
+  documents: [
+    {
+      id: 'doc-1',
+      name: 'Contrato social consolidado',
+      type: 'Societário',
+      expires: '2027-05-30',
+      status: 'Em dia',
+      fileName: '',
+    },
+    {
+      id: 'doc-2',
+      name: 'Certidão conjunta federal',
+      type: 'Certidão',
+      expires: '2026-11-12',
+      status: 'Atenção',
+      fileName: '',
+    },
+    {
+      id: 'doc-3',
+      name: 'Certidão estadual',
+      type: 'Certidão',
+      expires: '2026-10-19',
+      status: 'Vence em breve',
+      fileName: '',
+    },
+    {
+      id: 'doc-4',
+      name: 'Balanço patrimonial',
+      type: 'Contábil',
+      expires: '2027-04-30',
+      status: 'Em dia',
+      fileName: '',
+    },
+  ],
+
+  profile: {
+    company: 'Minha empresa',
+    branches: [
+      'Material de escritório',
+      'Tecnologia',
+      'Prestação de serviços',
+      'Alimentos',
+    ],
+    uf: 'CE',
+  },
+};
+
+function loadData() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+
+    if (!saved) return initialData;
+
+    const parsed = JSON.parse(saved);
+
+    return {
+      opportunities: Array.isArray(parsed.opportunities)
+        ? parsed.opportunities
+        : initialData.opportunities,
+      tasks: Array.isArray(parsed.tasks)
+        ? parsed.tasks
+        : initialData.tasks,
+      documents: Array.isArray(parsed.documents)
+        ? parsed.documents
+        : initialData.documents,
+      profile: parsed.profile || initialData.profile,
+    };
+  } catch {
+    return initialData;
+  }
+}
+
+const nav = [
+  {
+    id: 'overview',
+    label: 'Visão geral',
+    icon: LayoutDashboard,
+    group: 'WORKSPACE',
+  },
+  {
+    id: 'radar',
+    label: 'Radar de licitações',
+    icon: Radar,
+    group: 'WORKSPACE',
+  },
+  {
+    id: 'processes',
+    label: 'Meus processos',
+    icon: BriefcaseBusiness,
+    group: 'WORKSPACE',
+  },
+  {
+    id: 'tasks',
+    label: 'Tarefas e prazos',
+    icon: ListTodo,
+    group: 'GESTÃO',
+  },
+  {
+    id: 'documents',
+    label: 'Documentos',
+    icon: FolderOpen,
+    group: 'GESTÃO',
+  },
+  {
+    id: 'calculator',
+    label: 'Calculadora de preço',
+    icon: Wallet,
+    group: 'FERRAMENTAS',
+  },
+  {
+  id: 'partners',
+  label: 'Carteira de clientes',
+  icon: Users,
+  group: 'COMERCIAL',
+},
+{
+  id: 'alerts',
+  label: 'Alertas e automação',
+  icon: BellRing,
+  group: 'GESTÃO',
+},
+];
+
+const statusOptions = [
+  'Em análise',
+  'Documentação',
+  'Preparar proposta',
+  'Disputa agendada',
+  'Enviada',
+  'Vencida',
+  'Perdida',
+  'Monitorar',
+];
+
+// Normalização para comparar textos independentemente de acentos ou caixa.
+const normalizeSearchText = (value) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+// Sinônimos iniciais para associar os ramos da empresa aos objetos dos editais.
+const BRANCH_SYNONYMS = [
+  {
+    aliases: [
+      'tecnologia',
+      'informatica',
+      'equipamentos de informatica',
+      'computacao',
+    ],
+    terms: [
+      'computador', 'computadores', 'notebook', 'laptop', 'desktop',
+      'microcomputador', 'servidor', 'monitor', 'impressora', 'scanner',
+      'roteador', 'switch', 'rede de computadores', 'software', 'hardware',
+      'tablet', 'projetor', 'periferico', 'toner',
+      'equipamentos de informatica',
+    ],
+  },
+  {
+    aliases: [
+      'material de escritorio',
+      'material de expediente',
+      'papelaria',
+    ],
+    terms: [
+      'papel', 'caneta', 'lapis', 'caderno', 'pasta arquivo',
+      'grampeador', 'clips', 'envelope', 'toner', 'cartucho',
+      'material de expediente', 'material de consumo',
+      'material de escritorio',
+    ],
+  },
+  {
+    aliases: [
+      'alimentos',
+      'generos alimenticios',
+      'generos alimentares',
+      'alimentacao',
+    ],
+    terms: [
+      'generos alimenticios', 'alimento', 'merenda escolar',
+      'carne', 'frango', 'arroz', 'feijao', 'leite', 'hortifruti',
+      'cesta basica', 'produto alimenticio',
+    ],
+  },
+  {
+    aliases: [
+      'limpeza e conservacao',
+      'limpeza',
+      'higiene',
+      'saneantes',
+    ],
+    terms: [
+      'detergente', 'desinfetante', 'sabonete', 'papel higienico',
+      'material de limpeza', 'higienizacao', 'saneante',
+      'servicos de limpeza', 'conservacao predial',
+    ],
+  },
+  {
+    aliases: [
+      'construcao',
+      'obras',
+      'engenharia',
+      'material de construcao',
+    ],
+    terms: [
+      'cimento', 'areia', 'brita', 'tijolo', 'material de construcao',
+      'obra', 'reforma', 'engenharia civil', 'tinta', 'tubulacao',
+    ],
+  },
+  {
+    aliases: [
+      'medicamentos',
+      'farmacia',
+      'material hospitalar',
+      'saude',
+    ],
+    terms: [
+      'medicamento', 'farmaceutico', 'hospitalar', 'seringa',
+      'luva descartavel', 'material medico', 'equipamento medico',
+      'insumo hospitalar', 'produto para saude',
+    ],
+  },
+  {
+    aliases: ['veiculos', 'automotivo', 'frota'],
+    terms: [
+      'veiculo', 'automovel', 'caminhao', 'onibus', 'ambulancia',
+      'motocicleta', 'pneu', 'pecas automotivas', 'manutencao veicular',
+    ],
+  },
+  {
+    aliases: ['mobiliario escolar', 'mobiliario', 'moveis'],
+    terms: [
+      'mesa', 'cadeira', 'armario', 'estante', 'carteira escolar',
+      'mobiliario', 'moveis',
+    ],
+  },
+  {
+    aliases: [
+      'uniformes',
+      'vestuario',
+      'roupas',
+      'equipamentos de protecao individual',
+    ],
+    terms: [
+      'uniforme', 'camisa', 'calca', 'vestuario', 'calcado',
+      'bota', 'epi', 'equipamento de protecao individual',
+    ],
+  },
+  {
+    aliases: ['servicos de vigilancia', 'seguranca patrimonial'],
+    terms: [
+      'vigilancia', 'seguranca patrimonial', 'portaria',
+      'monitoramento patrimonial',
+    ],
+  },
+  {
+    aliases: [
+      'prestacao de servicos',
+      'servicos gerais',
+      'terceirizacao',
+    ],
+    terms: [
+      'prestacao de servicos', 'servicos continuados', 'mao de obra',
+      'servicos gerais', 'terceirizacao', 'apoio administrativo',
+    ],
+  },
+];
+
+function getBranchSearchTerms(branch) {
+  const normalizedBranch = normalizeSearchText(branch);
+  const terms = new Set();
+
+  if (normalizedBranch.length >= 3) {
+    terms.add(normalizedBranch);
+  }
+
+  for (const group of BRANCH_SYNONYMS) {
+    const matchesGroup = group.aliases.some((alias) => {
+      const normalizedAlias = normalizeSearchText(alias);
+
+      return normalizedBranch === normalizedAlias ||
+        (
+          normalizedAlias.length >= 4 &&
+          normalizedBranch.includes(normalizedAlias)
+        );
+    });
+
+    if (matchesGroup) {
+      group.terms.forEach((term) => {
+        terms.add(normalizeSearchText(term));
+      });
+    }
+  }
+
+  return [...terms].filter((term) => term.length >= 3);
+}
+
+function findMatchingBranches(record, branches) {
+  const searchableText = normalizeSearchText([
+    record.title,
+    record.raw?.objetoCompra,
+    record.raw?.descricaoObjeto,
+    record.raw?.informacaoComplementar,
+  ].filter(Boolean).join(' '));
+
+  return branches.filter((branch) =>
+    getBranchSearchTerms(branch).some((term) =>
+      searchableText.includes(term)
+    )
+  );
+}
+
+function calculateProjectedProfit(item) {
+  if (
+    item.expectedRevenue === '' ||
+    item.expectedRevenue == null ||
+    item.estimatedCost === '' ||
+    item.estimatedCost == null
+  ) {
+    return null;
+  }
+
+  const revenue = Number(item.expectedRevenue);
+  const cost = Number(item.estimatedCost);
+  const taxPercent = Number(item.taxPercent ?? 0);
+
+  if (
+    !Number.isFinite(revenue) ||
+    !Number.isFinite(cost) ||
+    !Number.isFinite(taxPercent) ||
+    revenue <= 0 ||
+    cost < 0 ||
+    taxPercent < 0 ||
+    taxPercent > 100
+  ) {
+    return null;
+  }
+
+  return revenue - cost - (revenue * taxPercent) / 100;
+}
+
+function App() {
+  const [data, setData] = useState(loadData);
+  const [dataReady, setDataReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('loading');
+
+  const saveQueueRef = useRef(Promise.resolve());
+  const saveVersionRef = useRef(0);
+
+  const [page, setPage] = useState('overview');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Todos');
+  const [modal, setModal] = useState(null);
+  const [toast, setToast] = useState('');
+  const [partners, setPartners] = useState([]);
+  const [automationSettings, setAutomationSettings] = useState(null);
+  const [automationBusy, setAutomationBusy] = useState(false);
+  const [automationError, setAutomationError] = useState('');
+  const [pncpBusy, setPncpBusy] = useState(false);
+  const [pncpError, setPncpError] = useState('');
+  const [pncpResults, setPncpResults] = useState([]);
+  const [pncpInfo, setPncpInfo] = useState('');
+
+  const [pncpFilters, setPncpFilters] = useState({
+    modality: '6',
+    uf: 'CE',
+    days: '30',
+  });
+
+  const [taskFilter, setTaskFilter] = useState('Pendentes');
+
+  const [priceForm, setPriceForm] = useState({
+    cost: '100',
+    tax: '8',
+    freight: '4',
+    other: '3',
+    margin: '15',
+  });
+
+  // Carrega os dados do servidor antes de começar a sincronizar alterações.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFromServer() {
+      try {
+        const response = await fetch('/api/data');
+
+        if (!response.ok) {
+          throw new Error('Não foi possível carregar os dados da API.');
+        }
+
+        const payload = await response.json();
+
+        if (cancelled) return;
+
+        if (payload.data && typeof payload.data === 'object') {
+          const saved = payload.data;
+          const savedProfile =
+            saved.profile && typeof saved.profile === 'object'
+              ? saved.profile
+              : {};
+
+          setData({
+            opportunities: Array.isArray(saved.opportunities)
+              ? saved.opportunities
+              : [],
+            tasks: Array.isArray(saved.tasks)
+              ? saved.tasks
+              : [],
+            documents: Array.isArray(saved.documents)
+              ? saved.documents
+              : [],
+            profile: {
+              ...initialData.profile,
+              ...savedProfile,
+              branches: Array.isArray(savedProfile.branches)
+                ? savedProfile.branches
+                : initialData.profile.branches,
+            },
+          });
+        }
+      } catch (error) {
+        console.error('Falha ao carregar dados do servidor:', error);
+      } finally {
+        if (!cancelled) setDataReady(true);
+      }
+    }
+
+    loadFromServer();
+
+    useEffect(() => {
+  let cancelled = false;
+
+  async function loadAutomationData() {
+    try {
+      const [settingsResponse, partnersResponse] = await Promise.all([
+        fetch('/api/automation/settings'),
+        fetch('/api/partners'),
+      ]);
+
+      const settingsPayload = await settingsResponse.json();
+      const partnersPayload = await partnersResponse.json();
+
+      if (!settingsResponse.ok) {
+        throw new Error(
+          settingsPayload.error || 'Não foi possível carregar as configurações.'
+        );
+      }
+
+      if (!partnersResponse.ok) {
+        throw new Error(
+          partnersPayload.error || 'Não foi possível carregar os parceiros.'
+        );
+      }
+
+      if (cancelled) return;
+
+      setAutomationSettings(settingsPayload.settings);
+      setPartners(
+        Array.isArray(partnersPayload.partners)
+          ? partnersPayload.partners
+          : []
+      );
+
+      setAutomationError('');
+    } catch (error) {
+      if (!cancelled) {
+        setAutomationError(error.message);
+      }
+    }
+  }
+
+  loadAutomationData();
+
+  return () => {
+    cancelled = true;
+  };
+}, []);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Mantém uma cópia local e sincroniza com a API que grava pelo Prisma.
+  useEffect(() => {
+    if (!dataReady) return undefined;
+
+    const version = ++saveVersionRef.current;
+    const snapshot = JSON.stringify(data);
+
+    try {
+      localStorage.setItem(STORAGE_KEY, snapshot);
+    } catch (error) {
+      console.warn('Não foi possível atualizar a cópia local:', error);
+    }
+
+    const timer = setTimeout(() => {
+      if (version === saveVersionRef.current) {
+        setSyncStatus('saving');
+      }
+
+      const operation = saveQueueRef.current
+        .catch(() => {})
+        .then(async () => {
+          const response = await fetch('/api/data', {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: snapshot,
+          });
+
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(
+              payload.error || 'A API não conseguiu salvar os dados.'
+            );
+          }
+        });
+
+      saveQueueRef.current = operation;
+
+      operation
+        .then(() => {
+          if (version === saveVersionRef.current) {
+            setSyncStatus('saved');
+          }
+        })
+        .catch((error) => {
+          console.error('Falha ao persistir os dados:', error);
+
+          if (version === saveVersionRef.current) {
+            setSyncStatus('offline');
+          }
+        });
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [data, dataReady]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+
+    const timer = setTimeout(() => setToast(''), 3200);
+
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const updateData = (key, value) =>
+    setData((current) => ({ ...current, [key]: value }));
+
+  const activeOpportunities = data.opportunities.filter(
+    (item) => !['Vencida', 'Perdida'].includes(item.status)
+  );
+
+  const totalActive = activeOpportunities.length;
+  const now = new Date();
+
+  const deadlineCount = data.opportunities.filter((item) => {
+    const deadline = parseDate(item.deadline);
+
+    return (
+      deadline &&
+      deadline >= now &&
+      deadline.getTime() - now.getTime() <= 7 * 86400000 &&
+      !['Vencida', 'Perdida'].includes(item.status)
+    );
+  }).length;
+
+  const activeTasks = data.tasks.filter((task) => !task.done).length;
+
+  const profits = activeOpportunities
+    .map(calculateProjectedProfit)
+    .filter((value) => value !== null);
+
+  const projectedProfit = profits.length
+    ? profits.reduce((sum, value) => sum + value, 0)
+    : null;
+
+  const profitCoverage = profits.length;
+
+  const filteredOpportunities = useMemo(
+    () => data.opportunities.filter((item) => {
+      const text = [
+        item.title,
+        item.category,
+        item.agency,
+        item.location,
+        item.modality,
+      ].join(' ').toLowerCase();
+
+      return (
+        text.includes(query.toLowerCase()) &&
+        (statusFilter === 'Todos' || item.status === statusFilter)
+      );
+    }),
+    [data.opportunities, query, statusFilter]
+  );
+
+  function showPage(id) {
+    setPage(id);
+    setSidebarOpen(false);
+    setQuery('');
+    setStatusFilter('Todos');
+  }
+
+  function saveOpportunity(form) {
+    const normalized = {
+      ...form,
+      amount: Number(form.amount || 0),
+      expectedRevenue:
+        form.expectedRevenue === '' || form.expectedRevenue == null
+          ? null
+          : Number(form.expectedRevenue),
+      estimatedCost:
+        form.estimatedCost === '' || form.estimatedCost == null
+          ? null
+          : Number(form.estimatedCost),
+      taxPercent: Number(form.taxPercent || 0),
+      tasks: Array.isArray(form.tasks) ? form.tasks : [],
+    };
+
+    const exists = data.opportunities.some(
+      (item) => item.id === normalized.id
+    );
+
+    updateData(
+      'opportunities',
+      exists
+        ? data.opportunities.map((item) =>
+            item.id === normalized.id ? normalized : item
+          )
+        : [
+            {
+              ...normalized,
+              id: normalized.id || uid(),
+            },
+            ...data.opportunities,
+          ]
+    );
+
+    setModal(null);
+    setToast(
+      exists
+        ? 'Processo atualizado.'
+        : 'Licitação adicionada ao seu radar.'
+    );
+  }
+
+  function addPncpRecord(record) {
+    if (
+      data.opportunities.some(
+        (item) =>
+          item.sourceId === record.id ||
+          item.id === record.id
+      )
+    ) {
+      setToast('Esta oportunidade já está cadastrada.');
+      return;
+    }
+
+    const newItem = {
+      id: uid(),
+      sourceId: record.id,
+      title: record.title,
+      category:
+        record.matchedBranches?.join(', ') || 'Importado do PNCP',
+      agency: record.agency,
+      location: record.uf || pncpFilters.uf || 'BR',
+      modality: record.modality,
+      amount: record.amount || 0,
+      deadline: record.deadline || '',
+      status: 'Em análise',
+      source: 'PNCP',
+      url: record.url,
+      tasks: [],
+      expectedRevenue: null,
+      estimatedCost: null,
+      taxPercent: 0,
+    };
+
+    updateData('opportunities', [
+      newItem,
+      ...data.opportunities,
+    ]);
+
+    setToast('Oportunidade do PNCP adicionada aos seus processos.');
+  }
+
+  async function searchPncp() {
+    setPncpBusy(true);
+    setPncpError('');
+    setPncpInfo('');
+    setPncpResults([]);
+
+    const final = new Date();
+    final.setDate(final.getDate() + Number(pncpFilters.days || 30));
+
+    const date = [
+      final.getFullYear(),
+      String(final.getMonth() + 1).padStart(2, '0'),
+      String(final.getDate()).padStart(2, '0'),
+    ].join('');
+
+    const pageSize = 50;
+    const maxPages = 5;
+    const allRecords = [];
+
+    try {
+      for (
+        let pageNumber = 1;
+        pageNumber <= maxPages;
+        pageNumber += 1
+      ) {
+        const params = new URLSearchParams({
+          dataFinal: date,
+          pagina: String(pageNumber),
+          tamanhoPagina: String(pageSize),
+          modalidade: pncpFilters.modality,
+        });
+
+        if (pncpFilters.uf) {
+          params.set('uf', pncpFilters.uf);
+        }
+
+        const response = await fetch(
+          `/api/pncp/propostas?${params.toString()}`
+        );
+
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            payload.error || 'Falha na consulta ao PNCP.'
+          );
+        }
+
+        const pageRecords = Array.isArray(payload.records)
+          ? payload.records
+          : [];
+
+        allRecords.push(
+  ...pageRecords.map((record) => {
+    const raw = record.raw || {};
+    const unidade =
+      raw.unidadeOrgao ||
+      raw.unidadeAdministrativa ||
+      {};
+
+    const city = String(
+      record.city ||
+      unidade.municipioNome ||
+      unidade.nomeMunicipio ||
+      raw.municipioNome ||
+      raw.nomeMunicipio ||
+      ''
+    ).trim();
+
+    const uf = String(
+      record.uf ||
+      unidade.ufSigla ||
+      unidade.uf ||
+      raw.ufSigla ||
+      raw.uf ||
+      ''
+    ).trim().toUpperCase();
+
+    const location = city
+      ? [city, uf].filter(Boolean).join('/')
+      : (
+          record.location ||
+          (uf
+            ? `Município não informado/${uf}`
+            : 'Município não informado')
+        );
+
+    return {
+      ...record,
+      city,
+      uf,
+      location,
+    };
+  })
+);
+
+        if (pageRecords.length < pageSize) {
+          break;
+        }
+      }
+
+      const uniqueRecords = [
+        ...new Map(
+          allRecords.map((record) => [record.id, record])
+        ).values(),
+      ];
+
+      setPncpResults(uniqueRecords);
+
+      setPncpInfo(
+        `Consulta ao PNCP concluída: ${uniqueRecords.length} registro(s) recebido(s). ` +
+        (
+          uniqueRecords.length >= pageSize * maxPages
+            ? 'Limite de 250 registros atingido. Refine os filtros para ampliar a busca por partes.'
+            : 'Confira as correspondências com os ramos cadastrados da empresa.'
+        )
+      );
+    } catch (error) {
+      setPncpError(
+        `${error.message} Confira a conexão com a API e tente novamente.`
+      );
+    } finally {
+      setPncpBusy(false);
+    }
+  }
+
+  const addTask = (task) => {
+    updateData('tasks', [
+      { ...task, id: uid(), done: false },
+      ...data.tasks,
+    ]);
+
+    setModal(null);
+    setToast('Tarefa criada.');
+  };
+
+  const toggleTask = (id) =>
+    updateData(
+      'tasks',
+      data.tasks.map((item) =>
+        item.id === id
+          ? { ...item, done: !item.done }
+          : item
+      )
+    );
+
+  const editOpportunity = (item) =>
+    setModal({ type: 'opportunity', initial: item });
+
+  const editNew = () =>
+    setModal({ type: 'opportunity', initial: null });
+
+  return (
+    <div className="app-shell">
+      {sidebarOpen && (
+        <button
+          className="mobile-scrim"
+          aria-label="Fechar menu"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
+        <div className="brand">
+          <div className="brand-symbol">
+            <Radar size={22} />
+          </div>
+
+          <div>
+            <div className="brand-name">
+              licita<span>360</span>
+            </div>
+            <div className="brand-caption">
+              INTELIGÊNCIA EM COMPRAS
+            </div>
+          </div>
+
+          <button
+            className="icon-button sidebar-close"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Fechar menu"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="company-switch">
+          <div className="company-avatar">
+            {(data.profile.company || 'M').slice(0, 1).toUpperCase()}
+          </div>
+
+          <div className="company-meta">
+            <strong>{data.profile.company || 'Minha empresa'}</strong>
+            <span>Plano demonstração</span>
+          </div>
+
+          <ChevronDown size={16} className="muted-icon" />
+        </div>
+
+        {['WORKSPACE', 'COMERCIAL', 'GESTÃO', 'FERRAMENTAS'].map((group) => (
+          <div className="nav-group" key={group}>
+            <div className="nav-label">{group}</div>
+
+            {nav.filter((item) => item.group === group).map((item) => (
+              <button
+                key={item.id}
+                onClick={() => showPage(item.id)}
+                className={`nav-link ${page === item.id ? 'active' : ''}`}
+              >
+                <item.icon size={18} />
+                <span>{item.label}</span>
+
+                {item.id === 'tasks' && activeTasks > 0 && (
+                  <span className="nav-count">{activeTasks}</span>
+                )}
+              </button>
+            ))}
+          </div>
+        ))}
+
+        <div className="sidebar-bottom">
+          <div className="support-card">
+            <div className="support-icon">
+              <Sparkles size={17} />
+            </div>
+
+            <strong>Mais clareza. Mais controle.</strong>
+            <p>
+              Organize oportunidades, prazos e custos em um só lugar.
+            </p>
+
+            <button onClick={() => setModal({ type: 'help' })}>
+              Conhecer recursos <ArrowRight size={14} />
+            </button>
+          </div>
+
+          <button
+            className="nav-link"
+            onClick={() => setModal({ type: 'settings' })}
+          >
+            <Settings2 size={18} />
+            <span>Configurações</span>
+          </button>
+
+          <button
+            className="profile-row"
+            onClick={() => setModal({ type: 'settings' })}
+          >
+            <div className="user-avatar">AD</div>
+            <div>
+              <strong>Administrador</strong>
+              <span>Gestão da empresa</span>
+            </div>
+            <ChevronDown size={15} />
+          </button>
+        </div>
+      </aside>
+
+      <main className="main-area">
+        <header className="topbar">
+          <div className="topbar-left">
+            <button
+              className="icon-button menu-button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Abrir menu"
+            >
+              <Menu size={20} />
+            </button>
+
+            <div className="breadcrumbs">
+              Workspace <ChevronRight size={14} />
+              <strong>
+                {nav.find((item) => item.id === page)?.label || 'Visão geral'}
+              </strong>
+            </div>
+          </div>
+
+          <div className="topbar-actions">
+            <div className="system-status">
+              <span
+                className={`status-dot ${
+                  syncStatus === 'offline' ? 'offline' : ''
+                }`}
+              />
+
+              {syncStatus === 'loading' && 'Carregando dados...'}
+              {syncStatus === 'saving' && 'Salvando dados...'}
+              {syncStatus === 'saved' && 'Dados sincronizados'}
+              {syncStatus === 'offline' && 'API indisponível — cópia local'}
+            </div>
+
+            <button
+              className="icon-button notification-button"
+              onClick={() => showPage('tasks')}
+              aria-label="Ver prazos"
+            >
+              <Bell size={19} />
+              {activeTasks > 0 && <i />}
+            </button>
+
+            <div className="topbar-divider" />
+
+            <div className="top-user">
+              <div className="user-avatar small">AD</div>
+              <ChevronDown size={15} />
+            </div>
+          </div>
+        </header>
+
+        <div className="page-content">
+          {page === 'overview' && (
+            <Overview
+              data={data}
+              totalActive={totalActive}
+              deadlineCount={deadlineCount}
+              activeTasks={activeTasks}
+              projectedProfit={projectedProfit}
+              profitCoverage={profitCoverage}
+              onNavigate={showPage}
+              onNew={editNew}
+              onEdit={editOpportunity}
+              onTask={toggleTask}
+              onSettings={() => setModal({ type: 'settings' })}
+            />
+          )}
+
+          {page === 'radar' && (
+            <RadarPage
+              query={query}
+              setQuery={setQuery}
+              statusFilter={statusFilter}
+              setStatusFilter={setStatusFilter}
+              opportunities={filteredOpportunities}
+              pncpBusy={pncpBusy}
+              pncpError={pncpError}
+              pncpInfo={pncpInfo}
+              pncpResults={pncpResults}
+              pncpFilters={pncpFilters}
+              setPncpFilters={setPncpFilters}
+              searchPncp={searchPncp}
+              profile={data.profile}
+              onNew={editNew}
+              onEdit={editOpportunity}
+              onAddPncp={addPncpRecord}
+            />
+          )}
+
+          {page === 'processes' && (
+            <ProcessesPage
+              opportunities={filteredOpportunities}
+              query={query}
+              setQuery={setQuery}
+              statusFilter={statusFilter}
+              setStatusFilter={setStatusFilter}
+              onEdit={editOpportunity}
+              onNew={editNew}
+              onRemove={(id) => {
+                if (confirm('Excluir este processo da lista?')) {
+                  updateData(
+                    'opportunities',
+                    data.opportunities.filter((item) => item.id !== id)
+                  );
+
+                  setToast('Processo removido.');
+                }
+              }}
+            />
+          )}
+
+          {page === 'tasks' && (
+            <TasksPage
+              tasks={data.tasks}
+              opportunities={data.opportunities}
+              filter={taskFilter}
+              setFilter={setTaskFilter}
+              onToggle={toggleTask}
+              onNew={() => setModal({ type: 'task' })}
+              onDelete={(id) =>
+                updateData(
+                  'tasks',
+                  data.tasks.filter((task) => task.id !== id)
+                )
+              }
+            />
+          )}
+
+          {page === 'partners' && (
+            <PartnersPage
+              partners={partners}
+              onSave={persistPartner}
+              onDelete={removePartner}
+            />
+          )}
+
+          {page === 'alerts' && (
+            <AlertsPage
+              settings={automationSettings}
+              error={automationError}
+              busy={automationBusy}
+              onSave={saveAutomationSettings}
+              onRun={runAutomationNow}
+              onTestEmail={sendTestEmail}
+            />
+          )}
+          {page === 'documents' && (
+            <DocumentsPage
+              documents={data.documents}
+              onUpload={(doc) => {
+                updateData('documents', [
+                  { ...doc, id: uid() },
+                  ...data.documents,
+                ]);
+
+                setToast(
+                  'Documento registrado. Nesta versão, apenas os metadados são persistidos.'
+                );
+              }}
+              onRemove={(id) =>
+                updateData(
+                  'documents',
+                  data.documents.filter((doc) => doc.id !== id)
+                )
+              }
+            />
+          )}
+
+          {page === 'calculator' && (
+            <CalculatorPage
+              form={priceForm}
+              setForm={setPriceForm}
+            />
+          )}
+        </div>
+
+        <footer className="app-footer">
+          <span>
+            Licita360 <span className="footer-dot">•</span> MVP 0.1.0
+          </span>
+
+          <span>
+            {syncStatus === 'loading' && 'Carregando dados...'}
+            {syncStatus === 'saving' && 'Sincronizando alterações...'}
+            {syncStatus === 'saved' && 'Dados persistidos no PostgreSQL via API'}
+            {syncStatus === 'offline' && 'Servidor indisponível; cópia local mantida'}
+          </span>
+        </footer>
+      </main>
+
+      {modal?.type === 'opportunity' && (
+        <OpportunityModal
+          initial={modal.initial}
+          onClose={() => setModal(null)}
+          onSave={saveOpportunity}
+        />
+      )}
+
+      {modal?.type === 'task' && (
+        <TaskModal
+          opportunities={data.opportunities}
+          onClose={() => setModal(null)}
+          onSave={addTask}
+        />
+      )}
+
+      {modal?.type === 'settings' && (
+        <SettingsModal
+          profile={data.profile}
+          onClose={() => setModal(null)}
+          onSave={(profile) => {
+            updateData('profile', profile);
+            setModal(null);
+            setToast('Configurações atualizadas.');
+          }}
+          onReset={() => {
+            if (
+              confirm(
+                'ATENÇÃO: restaurar os exemplos substituirá os dados atuais na interface e no PostgreSQL. Faça backup antes. Deseja continuar?'
+              )
+            ) {
+              setData(initialData);
+              setModal(null);
+              setToast('Exemplos restaurados na interface.');
+            }
+          }}
+        />
+      )}
+
+      {modal?.type === 'help' && (
+        <HelpModal onClose={() => setModal(null)} />
+      )}
+
+      {toast && (
+        <div className="toast">
+          <CheckCircle2 size={17} />
+          {toast}
+          <button
+            onClick={() => setToast('')}
+            aria-label="Fechar notificação"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PageHeader({ eyebrow, title, description, actions }) {
+  return (
+    <div className="page-header">
+      <div>
+        <div className="eyebrow">{eyebrow}</div>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </div>
+
+      {actions && <div className="page-actions">{actions}</div>}
+    </div>
+  );
+}
+
+function PrimaryButton({
+  children,
+  onClick,
+  icon: Icon = Plus,
+  variant = 'primary',
+  type = 'button',
+  disabled = false,
+}) {
+  return (
+    <button
+      type={type}
+      disabled={disabled}
+      className={`button button-${variant}`}
+      onClick={onClick}
+    >
+      {Icon && <Icon size={16} />}
+      <span>{children}</span>
+    </button>
+  );
+}
+
+function MetricCard({ label, value, hint, icon: Icon, color, change, onClick }) {
+  return (
+    <button
+      className={`metric-card metric-${color}`}
+      onClick={onClick}
+      type="button"
+    >
+      <div className="metric-top">
+        <span>{label}</span>
+        <span className="metric-icon">
+          <Icon size={19} />
+        </span>
+      </div>
+
+      <div className="metric-value">{value}</div>
+
+      <div className="metric-bottom">
+        <span>
+          {change && <strong>{change}</strong>} {hint}
+        </span>
+        <ArrowUpRight size={15} />
+      </div>
+    </button>
+  );
+}
+
+function Overview({
+  data,
+  totalActive,
+  deadlineCount,
+  activeTasks,
+  projectedProfit,
+  profitCoverage,
+  onNavigate,
+  onNew,
+  onEdit,
+  onTask,
+  onSettings,
+}) {
+  const priorities = data.tasks.filter((task) => !task.done).slice(0, 4);
+
+  const topOps = [...data.opportunities]
+    .sort(
+      (a, b) =>
+        (parseDate(a.deadline)?.getTime() ?? Infinity) -
+        (parseDate(b.deadline)?.getTime() ?? Infinity)
+    )
+    .slice(0, 4);
+
+  const totalTasks = data.opportunities.reduce(
+    (n, item) => n + (item.tasks || []).length,
+    0
+  );
+
+  const doneTasks = data.opportunities.reduce(
+    (n, item) =>
+      n + (item.tasks || []).filter((task) => task.done).length,
+    0
+  );
+
+  const completion = totalTasks
+    ? Math.round((doneTasks / totalTasks) * 100)
+    : 0;
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+
+  const sevenDaysFromNow = new Date(todayStart);
+  sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+
+  const thirtyDaysFromNow = new Date(todayStart);
+  thirtyDaysFromNow.setDate(thirtyDaysFromNow.getDate() + 30);
+
+  const documentAlerts = data.documents.filter((document) => {
+    const expiry = parseDate(document.expires);
+    return expiry && expiry <= thirtyDaysFromNow;
+  });
+
+  const taskAlerts = data.tasks.filter((task) => {
+    if (task.done || !task.date) return false;
+
+    const dueDate = parseDate(task.date);
+    return dueDate && dueDate < tomorrowStart;
+  });
+
+  const processAlerts = data.opportunities.filter((item) => {
+    if (['Vencida', 'Perdida'].includes(item.status)) return false;
+
+    const deadline = parseDate(item.deadline);
+    return (
+      deadline &&
+      deadline >= todayStart &&
+      deadline <= sevenDaysFromNow
+    );
+  });
+
+  const attentionCount =
+    documentAlerts.length +
+    taskAlerts.length +
+    processAlerts.length;
+
+  return (
+    <>
+      <PageHeader
+        eyebrow={new Intl.DateTimeFormat('pt-BR', {
+          weekday: 'long',
+          day: '2-digit',
+          month: 'long',
+        }).format(new Date()).toUpperCase()}
+        title="Visão geral"
+        description="Aqui está o resumo do que merece sua atenção hoje."
+        actions={
+          <>
+            <button
+              className="button button-secondary"
+              onClick={() => onNavigate('radar')}
+            >
+              <Radar size={16} /> Buscar oportunidades
+            </button>
+            <PrimaryButton onClick={onNew}>Nova licitação</PrimaryButton>
+          </>
+        }
+      />
+
+      <div className="welcome-strip">
+        <div className="welcome-mark">
+          <Activity size={22} />
+        </div>
+        <div>
+          <strong>Bom trabalho começa com visão clara.</strong>
+          <p>
+            Organize seus processos, acompanhe os prazos e mantenha sua
+            operação em movimento.
+          </p>
+        </div>
+        <div className="welcome-right">
+          <span className="live-pulse" />
+          Visão atualizada
+        </div>
+      </div>
+
+      <div className="metric-grid">
+        <MetricCard
+          label="Processos ativos"
+          value={String(totalActive).padStart(2, '0')}
+          hint="na sua carteira"
+          icon={BriefcaseBusiness}
+          color="blue"
+          onClick={() => onNavigate('processes')}
+        />
+
+        <MetricCard
+          label="Prazos próximos"
+          value={String(deadlineCount).padStart(2, '0')}
+          hint="nos próximos 7 dias"
+          icon={CalendarClock}
+          color="amber"
+          onClick={() => onNavigate('tasks')}
+        />
+
+        <MetricCard
+          label="Tarefas pendentes"
+          value={String(activeTasks).padStart(2, '0')}
+          hint="para concluir"
+          icon={ClipboardCheck}
+          color="violet"
+          onClick={() => onNavigate('tasks')}
+        />
+
+        <MetricCard
+          label="Lucro projetado"
+          value={profitCoverage ? fmtBRL(projectedProfit) : '—'}
+          hint={
+            profitCoverage
+              ? `calculado em ${profitCoverage} processo(s)`
+              : 'informe receita e custo'
+          }
+          icon={Wallet}
+          color="green"
+          onClick={() => onNavigate('processes')}
+        />
+      </div>
+
+      <section className="panel attention-panel">
+        <div className="panel-header">
+          <div>
+            <h2>Atenção hoje</h2>
+            <p>Pendências identificadas nos registros da sua empresa.</p>
+          </div>
+
+          <span className="attention-total">
+            {attentionCount === 0
+              ? 'Tudo em dia'
+              : `${attentionCount} alerta(s)`}
+          </span>
+        </div>
+
+        <div className="attention-grid">
+          <button
+            type="button"
+            className="attention-item"
+            onClick={() => onNavigate('documents')}
+          >
+            <span className="attention-item-icon">
+              <FileCheck2 size={19} />
+            </span>
+            <span className="attention-copy">
+              <strong>Documentos</strong>
+              <small>Vencidos ou vencendo em 30 dias</small>
+            </span>
+            <b>{documentAlerts.length}</b>
+          </button>
+
+          <button
+            type="button"
+            className="attention-item"
+            onClick={() => onNavigate('tasks')}
+          >
+            <span className="attention-item-icon">
+              <ClipboardCheck size={19} />
+            </span>
+            <span className="attention-copy">
+              <strong>Tarefas</strong>
+              <small>Atrasadas ou com prazo hoje</small>
+            </span>
+            <b>{taskAlerts.length}</b>
+          </button>
+
+          <button
+            type="button"
+            className="attention-item"
+            onClick={() => onNavigate('processes')}
+          >
+            <span className="attention-item-icon">
+              <CalendarClock size={19} />
+            </span>
+            <span className="attention-copy">
+              <strong>Prazos de processos</strong>
+              <small>Nos próximos 7 dias</small>
+            </span>
+            <b>{processAlerts.length}</b>
+          </button>
+        </div>
+      </section>
+
+      <div className="dashboard-grid">
+        <section className="panel opportunities-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Oportunidades em acompanhamento</h2>
+              <p>Processos com datas e etapas para monitorar</p>
+            </div>
+
+            <button
+              className="text-button"
+              onClick={() => onNavigate('processes')}
+            >
+              Ver todos <ArrowRight size={15} />
+            </button>
+          </div>
+
+          <div className="opportunity-list">
+            {topOps.map((item) => (
+              <OpportunityRow
+                key={item.id}
+                item={item}
+                onClick={() => onEdit(item)}
+              />
+            ))}
+
+            {!topOps.length && (
+              <EmptyState
+                icon={Radar}
+                title="Nenhum processo cadastrado"
+                description="Adicione uma licitação para começar seu acompanhamento."
+              />
+            )}
+          </div>
+
+          <div className="panel-bottom-link">
+            <button
+              className="subtle-link"
+              onClick={() => onNavigate('radar')}
+            >
+              <Radar size={16} />
+              Explorar novas oportunidades <ArrowRight size={15} />
+            </button>
+          </div>
+        </section>
+
+        <section className="panel task-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Minha lista de tarefas</h2>
+              <p>Pequenas ações, grandes resultados</p>
+            </div>
+
+            <button
+              className="icon-button tiny"
+              onClick={() => onNavigate('tasks')}
+            >
+              <ArrowRight size={16} />
+            </button>
+          </div>
+
+          <div className="task-list">
+            {priorities.length ? (
+              priorities.map((task) => (
+                <div className="task-row" key={task.id}>
+                  <button
+                    className={`task-check ${task.done ? 'checked' : ''}`}
+                    onClick={() => onTask(task.id)}
+                    aria-label={
+                      task.done ? 'Marcar pendente' : 'Concluir tarefa'
+                    }
+                  >
+                    {task.done && <Check size={13} />}
+                  </button>
+
+                  <div className="task-copy">
+                    <strong className={task.done ? 'task-done' : ''}>
+                      {task.title}
+                    </strong>
+                    <span>
+                      <Clock3 size={12} /> {formatDate(task.date)}
+                    </span>
+                  </div>
+
+                  <PriorityBadge value={task.priority} />
+                </div>
+              ))
+            ) : (
+              <EmptyState
+                icon={CheckCheck}
+                title="Tudo em dia"
+                description="Nenhuma tarefa pendente nesta lista."
+              />
+            )}
+          </div>
+
+          <button
+            className="full-width-link"
+            onClick={() => onNavigate('tasks')}
+          >
+            Abrir lista completa <ArrowRight size={15} />
+          </button>
+        </section>
+      </div>
+
+      <div className="bottom-grid">
+        <section className="panel branches-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Seus ramos de atuação</h2>
+              <p>Áreas acompanhadas pela empresa</p>
+            </div>
+
+            <button
+              className="icon-button tiny"
+              title="Editar empresa"
+              onClick={onSettings}
+            >
+              <ChevronDown size={15} />
+            </button>
+          </div>
+
+          <div className="branch-tags">
+            {data.profile.branches.map((branch) => (
+              <span className="branch-tag" key={branch}>
+                <span className="branch-dot" />
+                {branch}
+              </span>
+            ))}
+
+            <span className="branch-note">
+              {data.profile.branches.length} categorias cadastradas
+            </span>
+          </div>
+        </section>
+
+        <section className="panel progress-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Checklist dos processos</h2>
+              <p>Conclusão das tarefas vinculadas aos editais</p>
+            </div>
+
+            <span className="progress-value">{completion}%</span>
+          </div>
+
+          <div className="progress-track">
+            <div style={{ width: `${completion}%` }} />
+          </div>
+
+          <div className="progress-legend">
+            <span>{doneTasks} concluídas</span>
+            <span>{Math.max(0, totalTasks - doneTasks)} pendentes</span>
+          </div>
+        </section>
+      </div>
+
+      <div className="demo-notice">
+        <CircleHelp size={16} />
+        <span>
+          <strong>Modo demonstração:</strong> os exemplos iniciais são fictícios.
+          Substitua-os pelos dados da sua empresa. O lucro projetado só aparece
+          para processos com receita, custo e tributos informados.
+        </span>
+      </div>
+    </>
+  );
+}
+
+function OpportunityRow({ item, onClick }) {
+  const deadline = parseDate(item.deadline);
+  const expired = deadline && deadline < new Date();
+
+  return (
+    <button className="opportunity-row" onClick={onClick}>
+      <div
+        className={`opportunity-type-icon ${
+          item.source === 'PNCP' ? 'type-purple' : ''
+        }`}
+      >
+        <FileText size={19} />
+      </div>
+
+      <div className="opp-main">
+        <strong>{item.title}</strong>
+        <span>{item.agency}</span>
+
+        <div className="opp-tags">
+          <span className="category-chip">{item.category}</span>
+          <StatusBadge value={item.status} />
+        </div>
+      </div>
+
+      <div className="opp-value">
+        <strong>{fmtBRL(item.amount)}</strong>
+        <span>
+          <CalendarClock size={13} />
+          {expired ? 'Prazo passou' : formatDate(item.deadline)}
+        </span>
+      </div>
+
+      <ChevronRight size={17} className="row-chevron" />
+    </button>
+  );
+}
+
+function StatusBadge({ value }) {
+  const cls =
+    value === 'Disputa agendada' || value === 'Preparar proposta'
+      ? 'status-blue'
+      : value === 'Documentação' || value === 'Em análise'
+        ? 'status-amber'
+        : value === 'Enviada'
+          ? 'status-green'
+          : value === 'Perdida' || value === 'Vencida'
+            ? 'status-red'
+            : 'status-neutral';
+
+  return <span className={`status-badge ${cls}`}>{value}</span>;
+}
+
+function PriorityBadge({ value }) {
+  return (
+    <span className={`priority priority-${(value || 'Média').toLowerCase()}`}>
+      {value || 'Média'}
+    </span>
+  );
+}
+
+function EmptyState({ icon: Icon = FileSearch, title, description }) {
+  return (
+    <div className="empty-state">
+      <div className="empty-icon">
+        <Icon size={22} />
+      </div>
+      <strong>{title}</strong>
+      <p>{description}</p>
+    </div>
+  );
+}
+
+function SearchFilters({
+  query,
+  setQuery,
+  statusFilter,
+  setStatusFilter,
+}) {
+  return (
+    <div className="filter-toolbar">
+      <div className="search-box">
+        <Search size={17} />
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Buscar por edital, órgão, ramo..."
+        />
+      </div>
+
+      <div className="select-wrap">
+        <Filter size={15} />
+        <select
+          value={statusFilter}
+          onChange={(event) => setStatusFilter(event.target.value)}
+        >
+          <option>Todos</option>
+          {statusOptions.map((status) => (
+            <option key={status}>{status}</option>
+          ))}
+        </select>
+        <ChevronDown size={14} />
+      </div>
+    </div>
+  );
+}
+
+function RadarPage({
+  query,
+  setQuery,
+  statusFilter,
+  setStatusFilter,
+  opportunities,
+  pncpBusy,
+  pncpError,
+  pncpInfo,
+  pncpResults,
+  pncpFilters,
+  setPncpFilters,
+  searchPncp,
+  profile,
+  onNew,
+  onEdit,
+  onAddPncp,
+}) {
+  const [filterByBranches, setFilterByBranches] = useState(true);
+
+  const companyBranches = Array.isArray(profile?.branches)
+    ? profile.branches
+    : [];
+
+  const pncpVisibleResults = pncpResults
+    .map((record) => ({
+      ...record,
+      matchedBranches: findMatchingBranches(record, companyBranches),
+    }))
+    .filter((record) => {
+      if (!filterByBranches || !companyBranches.length) {
+        return true;
+      }
+
+      return record.matchedBranches.length > 0;
+    });
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="DESCOBERTA E OPORTUNIDADES"
+        title="Radar de licitações"
+        description="Pesquise, avalie e organize oportunidades para os ramos da sua empresa."
+        actions={
+          <PrimaryButton onClick={onNew}>
+            Cadastrar oportunidade
+          </PrimaryButton>
+        }
+      />
+
+      <section className="panel pncp-panel">
+        <div className="pncp-head">
+          <div className="pncp-mark">
+            <CloudDownload size={21} />
+          </div>
+
+          <div>
+            <h2>Buscar oportunidades no PNCP</h2>
+            <p>
+              Consulta à API pública do Portal Nacional de Contratações Públicas.
+            </p>
+          </div>
+
+          <span className="source-tag">
+            <span className="status-dot" />
+            Fonte oficial
+          </span>
+        </div>
+
+        <div className="pncp-controls">
+          <label>
+            Modalidade
+            <select
+              value={pncpFilters.modality}
+              onChange={(e) =>
+                setPncpFilters((prev) => ({
+                  ...prev,
+                  modality: e.target.value,
+                }))
+              }
+            >
+              <option value="6">Pregão eletrônico</option>
+              <option value="4">Concorrência eletrônica</option>
+              <option value="8">Dispensa de licitação</option>
+              <option value="9">Inexigibilidade</option>
+              <option value="12">Credenciamento</option>
+              <option value="1">Leilão eletrônico</option>
+              <option value="2">Diálogo competitivo</option>
+              <option value="3">Concurso</option>
+            </select>
+          </label>
+
+          <label>
+            Estado (UF)
+            <select
+              value={pncpFilters.uf}
+              onChange={(e) =>
+                setPncpFilters((prev) => ({
+                  ...prev,
+                  uf: e.target.value,
+                }))
+              }
+            >
+              <option value="">Todos os estados</option>
+              {'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'
+                .split(' ')
+                .map((uf) => (
+                  <option key={uf}>{uf}</option>
+                ))}
+            </select>
+          </label>
+
+          <label>
+            Encerramento em
+            <select
+              value={pncpFilters.days}
+              onChange={(e) =>
+                setPncpFilters((prev) => ({
+                  ...prev,
+                  days: e.target.value,
+                }))
+              }
+            >
+              <option value="7">Próximos 7 dias</option>
+              <option value="15">Próximos 15 dias</option>
+              <option value="30">Próximos 30 dias</option>
+              <option value="60">Próximos 60 dias</option>
+            </select>
+          </label>
+
+          <PrimaryButton
+            onClick={searchPncp}
+            disabled={pncpBusy}
+            icon={pncpBusy ? LoaderCircle : Search}
+          >
+            {pncpBusy ? 'Consultando...' : 'Buscar no PNCP'}
+          </PrimaryButton>
+        </div>
+
+        <div className="branch-filter-control">
+          <label className="branch-filter-label">
+            <input
+              type="checkbox"
+              checked={filterByBranches}
+              disabled={!companyBranches.length}
+              onChange={(event) =>
+                setFilterByBranches(event.target.checked)
+              }
+            />
+            <span>
+              Mostrar somente licitações compatíveis com minha empresa
+            </span>
+          </label>
+
+          <p>
+            {companyBranches.length
+              ? `Ramos cadastrados: ${companyBranches.join(' · ')}`
+              : 'Cadastre seus ramos em Configurações para ativar esse filtro.'}
+          </p>
+        </div>
+
+        {pncpError && (
+          <div className="inline-alert alert-error">
+            <AlertCircle size={17} />
+            <span>{pncpError}</span>
+          </div>
+        )}
+
+        {pncpInfo && !pncpBusy && (
+          <div className="inline-alert">
+            <CheckCircle2 size={17} />
+            <span>{pncpInfo}</span>
+          </div>
+        )}
+
+        {pncpBusy && (
+          <div className="loading-line">
+            <LoaderCircle size={17} />
+            Consultando dados públicos do PNCP...
+          </div>
+        )}
+
+        {(pncpResults.length > 0 || pncpInfo) && !pncpBusy && (
+          <div className="pncp-results">
+            <div className="result-heading">
+              <strong>
+                {pncpVisibleResults.length} oportunidade(s)
+                {filterByBranches ? ' compatível(is)' : ' recebida(s)'}
+              </strong>
+
+              <span>
+                {filterByBranches && companyBranches.length
+                  ? 'Filtradas pelos ramos cadastrados da empresa.'
+                  : 'Filtro por ramo desativado.'}
+              </span>
+            </div>
+
+            {pncpResults.length > 0 && pncpVisibleResults.length === 0 && (
+              <div className="inline-alert">
+                <AlertCircle size={17} />
+                <span>
+                  Nenhuma oportunidade da amostra consultada corresponde aos
+                  ramos cadastrados. Tente ampliar as especialidades, alterar
+                  a UF ou a modalidade, ou desative o filtro para conferir os
+                  demais resultados.
+                </span>
+              </div>
+            )}
+
+            {pncpVisibleResults.map((record) => (
+              <div className="pncp-result-row" key={record.id}>
+                <div className="pncp-result-copy">
+                  <strong>{record.title}</strong>
+
+                  <span>
+  {record.agency || 'Órgão não informado'}
+  {' · '}
+  {record.city
+    ? [record.city, record.uf].filter(Boolean).join('/')
+    : (record.location || record.uf || 'Município não informado')}
+  {' · '}
+  {record.modality || 'Modalidade não informada'}
+</span>
+
+                  <div className="pncp-result-meta">
+                    <span>
+                      {record.amount
+                        ? fmtBRL(record.amount)
+                        : 'Valor não informado'}
+                    </span>
+
+                    <span>
+                      Propostas até: {formatDate(record.deadline)}
+                    </span>
+
+                    {record.matchedBranches.length > 0 && (
+                      <span>
+                        Área compatível: {record.matchedBranches.join(', ')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pncp-result-actions">
+                  <a
+                    href={record.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Abrir fonte <ArrowUpRight size={13} />
+                  </a>
+
+                  <button
+                    className="button button-small"
+                    onClick={() => onAddPncp(record)}
+                  >
+                    <Plus size={14} /> Adicionar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="pncp-footnote">
+          A consulta depende da disponibilidade da API do PNCP. O filtro por
+          ramo usa palavras-chave e sinônimos, portanto pode deixar passar
+          oportunidades ou exibir correspondências que exigem conferência.
+          Verifique o edital e a fonte oficial antes de decidir participar.
+        </div>
+      </section>
+
+      <div className="section-title-row">
+        <div>
+          <h2>Minha carteira de oportunidades</h2>
+          <p>Processos que você cadastrou ou importou para acompanhar.</p>
+        </div>
+
+        <span className="count-pill">
+          {opportunities.length} processos
+        </span>
+      </div>
+
+      <SearchFilters
+        query={query}
+        setQuery={setQuery}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+      />
+
+      <div className="radar-grid">
+        {opportunities.map((item) => (
+          <OpportunityCard
+            key={item.id}
+            item={item}
+            onClick={() => onEdit(item)}
+          />
+        ))}
+
+        {!opportunities.length && (
+          <div className="empty-card">
+            <EmptyState
+              icon={Radar}
+              title="Nenhuma oportunidade encontrada"
+              description="Altere seus filtros, busque no PNCP ou cadastre uma licitação manualmente."
+            />
+
+            <button
+              className="button button-secondary"
+              onClick={onNew}
+            >
+              <Plus size={16} /> Cadastrar oportunidade
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function OpportunityCard({ item, onClick }) {
+  return (
+    <button className="opportunity-card" onClick={onClick}>
+      <div className="card-top">
+        <span className="card-file-icon">
+          <FileText size={18} />
+        </span>
+        <StatusBadge value={item.status} />
+      </div>
+
+      <div className="card-category">{item.category}</div>
+      <h3>{item.title}</h3>
+      <p className="card-agency">{item.agency}</p>
+
+      <div className="card-details">
+        <div>
+          <span>Valor estimado</span>
+          <strong>{fmtBRL(item.amount)}</strong>
+        </div>
+        <div>
+          <span>Prazo</span>
+          <strong>{formatDate(item.deadline)}</strong>
+        </div>
+      </div>
+
+      <div className="card-footer">
+        <span className="region-chip">{item.location || 'BR'}</span>
+        <span className="modality-label">{item.modality}</span>
+        <ArrowRight size={16} />
+      </div>
+    </button>
+  );
+}
+
+const UF_OPTIONS =
+  'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
+
+function csvValues(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function emptyPartnerDraft() {
+  return {
+    name: '',
+    cnpj: '',
+    contactName: '',
+    email: '',
+    phone: '',
+    uf: 'CE',
+    cities: '',
+    branches: '',
+    minimumAmount: '',
+    maximumAmount: '',
+    active: true,
+    notifyOpportunities: true,
+  };
+}
+
+function PartnersPage({ partners, onSave, onDelete }) {
+  const [draft, setDraft] = useState(emptyPartnerDraft());
+
+  function update(key, value) {
+    setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function startEdit(partner) {
+    setDraft({
+      id: partner.id,
+      name: partner.name || '',
+      cnpj: partner.cnpj || '',
+      contactName: partner.contactName || '',
+      email: partner.email || '',
+      phone: partner.phone || '',
+      uf: partner.uf || 'CE',
+      cities: (partner.cities || []).join(', '),
+      branches: (partner.branches || [])
+        .map((branch) => branch.name)
+        .join(', '),
+      minimumAmount: partner.minimumAmount ?? '',
+      maximumAmount: partner.maximumAmount ?? '',
+      active: partner.active !== false,
+      notifyOpportunities: partner.notifyOpportunities !== false,
+    });
+
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+
+    const success = await onSave({
+      ...draft,
+      cities: csvValues(draft.cities),
+      branches: csvValues(draft.branches),
+      minimumAmount:
+        draft.minimumAmount === '' ? null : Number(draft.minimumAmount),
+      maximumAmount:
+        draft.maximumAmount === '' ? null : Number(draft.maximumAmount),
+    });
+
+    if (success) setDraft(emptyPartnerDraft());
+  }
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="PROSPECÇÃO COMERCIAL"
+        title="Carteira de clientes"
+        description="Cadastre empresas parceiras para encontrar licitações potencialmente interessantes para cada segmento."
+        actions={
+          <PrimaryButton
+            icon={Building2}
+            onClick={() => setDraft(emptyPartnerDraft())}
+          >
+            Nova empresa
+          </PrimaryButton>
+        }
+      />
+
+      <div className="partner-layout">
+        <section className="panel partner-form-panel">
+          <div className="panel-header">
+            <div>
+              <h2>{draft.id ? 'Editar empresa' : 'Cadastrar empresa parceira'}</h2>
+              <p>Defina segmentos e regiões para melhorar as correspondências.</p>
+            </div>
+          </div>
+
+          <form className="form-stack" onSubmit={submit}>
+            <label>
+              Nome da empresa
+              <input
+                required
+                value={draft.name}
+                onChange={(event) => update('name', event.target.value)}
+                placeholder="Nome comercial"
+              />
+            </label>
+
+            <div className="form-grid">
+              <label>
+                CNPJ (opcional)
+                <input
+                  value={draft.cnpj}
+                  onChange={(event) => update('cnpj', event.target.value)}
+                  placeholder="00.000.000/0000-00"
+                />
+              </label>
+
+              <label>
+                Nome do contato
+                <input
+                  value={draft.contactName}
+                  onChange={(event) => update('contactName', event.target.value)}
+                  placeholder="Responsável comercial"
+                />
+              </label>
+
+              <label>
+                E-mail de contato
+                <input
+                  type="email"
+                  value={draft.email}
+                  onChange={(event) => update('email', event.target.value)}
+                  placeholder="contato@empresa.com.br"
+                />
+              </label>
+
+              <label>
+                Telefone
+                <input
+                  value={draft.phone}
+                  onChange={(event) => update('phone', event.target.value)}
+                  placeholder="Telefone comercial"
+                />
+              </label>
+            </div>
+
+            <label>
+              Ramos de atuação
+              <input
+                required
+                value={draft.branches}
+                onChange={(event) => update('branches', event.target.value)}
+                placeholder="Dedetização, limpeza, serviços administrativos"
+              />
+              <small>Separe os ramos por vírgula.</small>
+            </label>
+
+            <div className="form-grid">
+              <label>
+                Estado principal
+                <select
+                  value={draft.uf}
+                  onChange={(event) => update('uf', event.target.value)}
+                >
+                  {UF_OPTIONS.map((uf) => (
+                    <option key={uf} value={uf}>{uf}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Cidades atendidas (opcional)
+                <input
+                  value={draft.cities}
+                  onChange={(event) => update('cities', event.target.value)}
+                  placeholder="Fortaleza, Maracanaú"
+                />
+              </label>
+
+              <label>
+                Valor mínimo (opcional)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={draft.minimumAmount}
+                  onChange={(event) => update('minimumAmount', event.target.value)}
+                />
+              </label>
+
+              <label>
+                Valor máximo (opcional)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={draft.maximumAmount}
+                  onChange={(event) => update('maximumAmount', event.target.value)}
+                />
+              </label>
+            </div>
+
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={draft.active}
+                onChange={(event) => update('active', event.target.checked)}
+              />
+              <span>Empresa ativa na carteira</span>
+            </label>
+
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={draft.notifyOpportunities}
+                onChange={(event) =>
+                  update('notifyOpportunities', event.target.checked)
+                }
+              />
+              <span>Gerar alertas de oportunidades compatíveis</span>
+            </label>
+
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => setDraft(emptyPartnerDraft())}
+              >
+                Limpar
+              </button>
+
+              <PrimaryButton type="submit" icon={Save}>
+                {draft.id ? 'Salvar empresa' : 'Cadastrar empresa'}
+              </PrimaryButton>
+            </div>
+          </form>
+        </section>
+
+        <section className="panel partner-list-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Empresas cadastradas</h2>
+              <p>{partners.length} empresa(s) na carteira</p>
+            </div>
+
+            <span className="count-pill">{partners.length}</span>
+          </div>
+
+          {partners.map((partner) => (
+            <article className="partner-row" key={partner.id}>
+              <div className="partner-avatar">
+                <Building2 size={19} />
+              </div>
+
+              <div className="partner-details">
+                <strong>{partner.name}</strong>
+                <span>
+                  {partner.contactName || 'Contato não cadastrado'}
+                  {' · '}
+                  {partner.uf || 'UF não informada'}
+                </span>
+                <span>
+                  {(partner.branches || [])
+                    .map((branch) => branch.name)
+                    .join(' · ') || 'Sem ramos cadastrados'}
+                </span>
+                {partner.cities?.length > 0 && (
+                  <small>Cidades: {partner.cities.join(', ')}</small>
+                )}
+                <small>
+                  {partner.active ? 'Ativa' : 'Inativa'}
+                  {' · '}
+                  {partner.notifyOpportunities
+                    ? 'Alertas habilitados'
+                    : 'Alertas desabilitados'}
+                </small>
+              </div>
+
+              <div className="partner-actions">
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => startEdit(partner)}
+                >
+                  Editar
+                </button>
+
+                <button
+                  type="button"
+                  className="button button-secondary button-small"
+                  onClick={() => onDelete(partner.id)}
+                >
+                  Excluir
+                </button>
+              </div>
+            </article>
+          ))}
+
+          {!partners.length && (
+            <EmptyState
+              icon={Users}
+              title="Sua carteira ainda está vazia"
+              description="Cadastre a primeira empresa e informe os ramos que ela atende."
+            />
+          )}
+        </section>
+      </div>
+
+      <div className="inline-alert">
+        <Mail size={17} />
+        <span>
+          Os avisos de correspondência são enviados ao e-mail principal
+          configurado em Alertas e automação. O e-mail de contato da parceira
+          fica cadastrado para referência; ele não recebe mensagens
+          automaticamente nesta versão.
+        </span>
+      </div>
+    </>
+  );
+}
+
+function AlertsPage({
+  settings,
+  error,
+  busy,
+  onSave,
+  onRun,
+  onTestEmail,
+}) {
+  const [form, setForm] = useState(null);
+
+  useEffect(() => {
+    if (!settings) return;
+
+    setForm({
+      recipientEmail: settings.recipientEmail || '',
+      enabled: Boolean(settings.enabled),
+      dailyEmailEnabled: settings.dailyEmailEnabled !== false,
+      documentAlertsEnabled: settings.documentAlertsEnabled !== false,
+      partnerAlertsEnabled: settings.partnerAlertsEnabled !== false,
+      ufs: (settings.ufs || ['CE']).join(', '),
+      modalities: (settings.modalities || ['8']).join(', '),
+      daysAhead: String(settings.daysAhead || 30),
+      minAmount: settings.minAmount ?? '',
+      maxAmount: settings.maxAmount ?? '',
+      documentAlertDays: (
+        settings.documentAlertDays || [30, 15, 7, 1, 0]
+      ).join(', '),
+    });
+  }, [settings]);
+
+  if (!form) {
+    return (
+      <div className="panel">
+        <div className="loading-line">
+          <LoaderCircle size={17} />
+          Carregando configurações de alertas...
+        </div>
+      </div>
+    );
+  }
+
+  function update(key, value) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function submit(event) {
+    event.preventDefault();
+
+    await onSave({
+      recipientEmail: form.recipientEmail.trim(),
+      enabled: form.enabled,
+      dailyEmailEnabled: form.dailyEmailEnabled,
+      documentAlertsEnabled: form.documentAlertsEnabled,
+      partnerAlertsEnabled: form.partnerAlertsEnabled,
+      ufs: csvValues(form.ufs).map((uf) => uf.toUpperCase()),
+      modalities: csvValues(form.modalities),
+      daysAhead: Number(form.daysAhead),
+      minAmount: form.minAmount === '' ? null : Number(form.minAmount),
+      maxAmount: form.maxAmount === '' ? null : Number(form.maxAmount),
+      documentAlertDays: csvValues(form.documentAlertDays).map(Number),
+    });
+  }
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="AUTOMAÇÃO E NOTIFICAÇÕES"
+        title="Alertas e automação"
+        description="Configure a prospecção programada, os filtros de oportunidades e os avisos da sua operação."
+        actions={
+          <PrimaryButton
+            icon={Play}
+            disabled={busy}
+            onClick={onRun}
+          >
+            Executar agora
+          </PrimaryButton>
+        }
+      />
+
+      {error && (
+        <div className="inline-alert alert-error">
+          <AlertCircle size={17} />
+          <span>{error}</span>
+        </div>
+      )}
+
+      <div className="panel alerts-panel">
+        <div className="panel-header">
+          <div>
+            <h2>Preferências de notificação</h2>
+            <p>Os alertas serão direcionados ao destinatário cadastrado aqui.</p>
+          </div>
+        </div>
+
+        <form className="form-stack" onSubmit={submit}>
+          <label>
+            E-mail que receberá os alertas
+            <input
+              required
+              type="email"
+              value={form.recipientEmail}
+              onChange={(event) => update('recipientEmail', event.target.value)}
+              placeholder="seuemail@empresa.com.br"
+            />
+          </label>
+
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={form.enabled}
+              onChange={(event) => update('enabled', event.target.checked)}
+            />
+            <span>Ativar prospecção automática pelo PNCP</span>
+          </label>
+
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={form.dailyEmailEnabled}
+              onChange={(event) =>
+                update('dailyEmailEnabled', event.target.checked)
+              }
+            />
+            <span>Receber o resumo diário de oportunidades por e-mail</span>
+          </label>
+
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={form.partnerAlertsEnabled}
+              onChange={(event) =>
+                update('partnerAlertsEnabled', event.target.checked)
+              }
+            />
+            <span>Receber avisos quando surgir oportunidade para uma parceira</span>
+          </label>
+
+          <label className="check-row">
+            <input
+              type="checkbox"
+              checked={form.documentAlertsEnabled}
+              onChange={(event) =>
+                update('documentAlertsEnabled', event.target.checked)
+              }
+            />
+            <span>Receber alertas de vencimento documental</span>
+          </label>
+
+          <div className="form-grid">
+            <label>
+              Estados (UF)
+              <input
+                value={form.ufs}
+                onChange={(event) => update('ufs', event.target.value)}
+                placeholder="CE, PB"
+              />
+              <small>Separe por vírgula. A consulta também considera a UF das parceiras ativas.</small>
+            </label>
+
+            <label>
+              Códigos de modalidade do PNCP
+              <input
+                value={form.modalities}
+                onChange={(event) => update('modalities', event.target.value)}
+                placeholder="8"
+              />
+              <small>Use os códigos de modalidade aceitos pela API do PNCP.</small>
+            </label>
+
+            <label>
+              Encerramento nos próximos dias
+              <select
+                value={form.daysAhead}
+                onChange={(event) => update('daysAhead', event.target.value)}
+              >
+                <option value="7">7 dias</option>
+                <option value="15">15 dias</option>
+                <option value="30">30 dias</option>
+                <option value="60">60 dias</option>
+                <option value="90">90 dias</option>
+              </select>
+            </label>
+
+            <label>
+              Valor mínimo (R$), opcional
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.minAmount}
+                onChange={(event) => update('minAmount', event.target.value)}
+              />
+            </label>
+
+            <label>
+              Valor máximo (R$), opcional
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.maxAmount}
+                onChange={(event) => update('maxAmount', event.target.value)}
+              />
+            </label>
+
+            <label>
+              Alertar documentos (dias antes)
+              <input
+                value={form.documentAlertDays}
+                onChange={(event) =>
+                  update('documentAlertDays', event.target.value)
+                }
+                placeholder="30, 15, 7, 1, 0"
+              />
+              <small>
+                Exemplo: 30, 15, 7, 1, 0 para avisos antes e no vencimento.
+              </small>
+            </label>
+          </div>
+
+          <div className="modal-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={busy}
+              onClick={onTestEmail}
+            >
+              <Mail size={16} /> Testar e-mail
+            </button>
+
+            <PrimaryButton type="submit" icon={Save}>
+              Salvar preferências
+            </PrimaryButton>
+          </div>
+        </form>
+      </div>
+
+      <section className="panel automation-info">
+        <h2>Agenda do serviço</h2>
+        <p>
+          A prospecção é programada para rodar a cada 30 minutos. O resumo
+          diário é programado para as 08:00, no horário de Fortaleza. A
+          execução manual permite testar a consulta imediatamente.
+        </p>
+        <p>
+          Para esses horários serem cumpridos, a API Express precisa estar em
+          execução. Se o computador estiver desligado, um servidor hospedado
+          continuamente será necessário.
+        </p>
+      </section>
+    </>
+  );
+}
+
+function ProcessesPage({
+  opportunities,
+  query,
+  setQuery,
+  statusFilter,
+  setStatusFilter,
+  onEdit,
+  onNew,
+  onRemove,
+}) {
+  return (
+    <>
+      <PageHeader
+        eyebrow="ACOMPANHAMENTO OPERACIONAL"
+        title="Meus processos"
+        description="Acompanhe cada oportunidade do primeiro filtro até o resultado."
+        actions={
+          <PrimaryButton onClick={onNew}>Novo processo</PrimaryButton>
+        }
+      />
+
+      <div className="process-summary">
+        <div>
+          <span>Na tela</span>
+          <strong>{opportunities.length}</strong>
+        </div>
+
+        <div>
+          <span>Em análise</span>
+          <strong>
+            {opportunities.filter((o) => o.status === 'Em análise').length}
+          </strong>
+        </div>
+
+        <div>
+          <span>Preparando proposta</span>
+          <strong>
+            {opportunities.filter((o) => o.status === 'Preparar proposta').length}
+          </strong>
+        </div>
+
+        <div>
+          <span>Valor estimado</span>
+          <strong>
+            {fmtBRL(
+              opportunities.reduce(
+                (sum, item) => sum + Number(item.amount || 0),
+                0
+              )
+            )}
+          </strong>
+        </div>
+      </div>
+
+      <SearchFilters
+        query={query}
+        setQuery={setQuery}
+        statusFilter={statusFilter}
+        setStatusFilter={setStatusFilter}
+      />
+
+      <div className="panel table-panel">
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Oportunidade</th>
+                <th>Órgão</th>
+                <th>Valor</th>
+                <th>Prazo</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {opportunities.map((item) => (
+                <tr key={item.id}>
+                  <td>
+                    <button
+                      className="table-title-button"
+                      onClick={() => onEdit(item)}
+                    >
+                      <strong>{item.title}</strong>
+                      <span>
+                        {item.category} · {item.modality}
+                      </span>
+                    </button>
+                  </td>
+
+                  <td>
+                    {item.agency}
+                    <span className="cell-muted">{item.location}</span>
+                  </td>
+
+                  <td className="amount-cell">{fmtBRL(item.amount)}</td>
+                  <td>{formatDate(item.deadline)}</td>
+
+                  <td>
+                    <StatusBadge value={item.status} />
+                  </td>
+
+                  <td>
+                    <div className="table-actions">
+                      <button
+                        className="icon-button tiny"
+                        title="Editar"
+                        onClick={() => onEdit(item)}
+                      >
+                        <Settings2 size={15} />
+                      </button>
+
+                      <button
+                        className="icon-button tiny danger-hover"
+                        title="Excluir"
+                        onClick={() => onRemove(item.id)}
+                      >
+                        <X size={15} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {!opportunities.length && (
+            <EmptyState
+              icon={BriefcaseBusiness}
+              title="Nenhum processo encontrado"
+              description="Cadastre um processo ou ajuste os filtros."
+            />
+          )}
+        </div>
+
+        <div className="table-footer">
+          Exibindo {opportunities.length} processo(s)
+          <span>Os dados são salvos no servidor quando a API está disponível.</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function TasksPage({
+  tasks,
+  opportunities,
+  filter,
+  setFilter,
+  onToggle,
+  onNew,
+  onDelete,
+}) {
+  const visible = tasks
+    .filter(
+      (task) =>
+        filter === 'Todas' ||
+        (filter === 'Pendentes' ? !task.done : task.done)
+    )
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="ROTINA E PRAZOS"
+        title="Tarefas e prazos"
+        description="Transforme cada exigência em uma ação com responsável e data."
+        actions={<PrimaryButton onClick={onNew}>Nova tarefa</PrimaryButton>}
+      />
+
+      <div className="task-stats">
+        <div className="task-stat-card">
+          <div className="task-stat-icon orange">
+            <Clock3 size={19} />
+          </div>
+          <div>
+            <strong>{tasks.filter((t) => !t.done).length}</strong>
+            <span>Pendentes</span>
+          </div>
+        </div>
+
+        <div className="task-stat-card">
+          <div className="task-stat-icon green">
+            <CheckCheck size={19} />
+          </div>
+          <div>
+            <strong>{tasks.filter((t) => t.done).length}</strong>
+            <span>Concluídas</span>
+          </div>
+        </div>
+
+        <div className="task-stat-card">
+          <div className="task-stat-icon violet">
+            <CalendarClock size={19} />
+          </div>
+          <div>
+            <strong>
+              {
+                tasks.filter(
+                  (t) => !t.done && t.date && t.date < todayISO()
+                ).length
+              }
+            </strong>
+            <span>Atrasadas</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="task-filter-tabs">
+        {['Pendentes', 'Todas', 'Concluídas'].map((item) => (
+          <button
+            key={item}
+            className={filter === item ? 'selected' : ''}
+            onClick={() => setFilter(item)}
+          >
+            {item}
+
+            <span>
+              {item === 'Todas'
+                ? tasks.length
+                : item === 'Pendentes'
+                  ? tasks.filter((t) => !t.done).length
+                  : tasks.filter((t) => t.done).length}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <div className="panel task-manager">
+        {visible.map((task) => (
+          <div
+            className={`manager-task ${task.done ? 'completed' : ''}`}
+            key={task.id}
+          >
+            <button
+              className={`task-check large ${task.done ? 'checked' : ''}`}
+              onClick={() => onToggle(task.id)}
+              aria-label={task.done ? 'Marcar pendente' : 'Concluir tarefa'}
+            >
+              {task.done && <Check size={14} />}
+            </button>
+
+            <div className="manager-task-main">
+              <strong>{task.title}</strong>
+              <span>
+                <CalendarClock size={13} />
+                {formatDate(task.date)}
+
+                {task.linked && (
+                  <>
+                    {' '}
+                    <span className="task-separator">·</span>{' '}
+                    {opportunities.find(
+                      (item) => item.id === task.linked
+                    )?.title || 'Processo vinculado'}
+                  </>
+                )}
+              </span>
+            </div>
+
+            <PriorityBadge value={task.priority} />
+
+            <button
+              className="icon-button tiny danger-hover"
+              onClick={() => onDelete(task.id)}
+              title="Excluir tarefa"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        ))}
+
+        {!visible.length && (
+          <EmptyState
+            icon={ListTodo}
+            title="Nenhuma tarefa por aqui"
+            description="Crie uma tarefa ou escolha outro filtro."
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+function DocumentsPage({ documents, onUpload, onRemove }) {
+  const [draft, setDraft] = useState({
+    name: '',
+    type: 'Certidão',
+    expires: '',
+  });
+
+  const [selectedFile, setSelectedFile] = useState(null);
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+
+    if (!draft.name.trim()) return;
+
+    const expiry = parseDate(draft.expires);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const limit = new Date(today);
+    limit.setDate(limit.getDate() + 30);
+
+    onUpload({
+      ...draft,
+      status: !expiry
+        ? 'Sem validade informada'
+        : expiry < today
+          ? 'Vencido'
+          : expiry <= limit
+            ? 'Vence em breve'
+            : 'Em dia',
+      fileName: selectedFile?.name || '',
+    });
+
+    setDraft({ name: '', type: 'Certidão', expires: '' });
+    setSelectedFile(null);
+    event.currentTarget.reset();
+  };
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="HABILITAÇÃO E ARQUIVOS"
+        title="Cofre de documentos"
+        description="Controle os documentos da empresa e acompanhe seus vencimentos."
+        actions={
+          <PrimaryButton
+            onClick={() => document.getElementById('doc-name')?.focus()}
+            icon={Upload}
+          >
+            Adicionar documento
+          </PrimaryButton>
+        }
+      />
+
+      <div className="document-notice">
+        <ShieldCheck size={19} />
+        <div>
+          <strong>Organização documental</strong>
+          <p>
+            Esta versão salva os metadados no PostgreSQL. O arquivo selecionado
+            ainda não é enviado ao servidor; o nome do arquivo é apenas uma
+            referência.
+          </p>
+        </div>
+      </div>
+
+      <div className="document-layout">
+        <section className="panel document-list-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Documentos cadastrados</h2>
+              <p>{documents.length} itens cadastrados</p>
+            </div>
+
+            <span className="count-pill">
+              {documents.filter((doc) => doc.status !== 'Em dia').length} atenção
+            </span>
+          </div>
+
+          {documents.map((doc) => (
+            <div className="document-row" key={doc.id}>
+              <div className="document-icon">
+                <FileCheck2 size={19} />
+              </div>
+
+              <div className="document-copy">
+                <strong>{doc.name}</strong>
+                <span>
+                  {doc.type}
+                  {doc.fileName ? ` · ${doc.fileName}` : ''}
+                </span>
+                <small>Validade: {formatDate(doc.expires)}</small>
+              </div>
+
+              <span
+                className={`doc-status ${
+                  doc.status === 'Em dia' ? 'doc-ok' : 'doc-warning'
+                }`}
+              >
+                {doc.status}
+              </span>
+
+              <button
+                className="icon-button tiny danger-hover"
+                onClick={() => onRemove(doc.id)}
+                aria-label="Remover documento"
+              >
+                <X size={15} />
+              </button>
+            </div>
+          ))}
+
+          {!documents.length && (
+            <EmptyState
+              icon={FolderOpen}
+              title="Seu cofre está vazio"
+              description="Cadastre os documentos usados na habilitação."
+            />
+          )}
+        </section>
+
+        <section className="panel add-document-panel">
+          <div className="panel-header">
+            <div>
+              <h2>Novo documento</h2>
+              <p>Cadastre nome, categoria e validade.</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="form-stack">
+            <label>
+              Nome do documento
+              <input
+                id="doc-name"
+                required
+                value={draft.name}
+                onChange={(e) =>
+                  setDraft({ ...draft, name: e.target.value })
+                }
+                placeholder="Ex.: Certidão municipal"
+              />
+            </label>
+
+            <label>
+              Categoria
+              <select
+                value={draft.type}
+                onChange={(e) =>
+                  setDraft({ ...draft, type: e.target.value })
+                }
+              >
+                <option>Certidão</option>
+                <option>Societário</option>
+                <option>Contábil</option>
+                <option>Técnico</option>
+                <option>Declaração</option>
+                <option>Outro</option>
+              </select>
+            </label>
+
+            <label>
+              Data de validade
+              <input
+                type="date"
+                value={draft.expires}
+                onChange={(e) =>
+                  setDraft({ ...draft, expires: e.target.value })
+                }
+              />
+            </label>
+
+            <label>
+              Arquivo (opcional)
+              <input
+                type="file"
+                onChange={(e) =>
+                  setSelectedFile(e.target.files?.[0] || null)
+                }
+              />
+              <small>
+                O arquivo não é transferido nesta versão; somente seu nome será guardado.
+              </small>
+            </label>
+
+            <PrimaryButton type="submit" icon={Plus}>
+              Registrar documento
+            </PrimaryButton>
+          </form>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function CalculatorPage({ form, setForm }) {
+  const cost = Number(form.cost) || 0;
+  const tax = Number(form.tax) || 0;
+  const freight = Number(form.freight) || 0;
+  const other = Number(form.other) || 0;
+  const margin = Number(form.margin) || 0;
+
+  const baseCost = cost + freight + other;
+  const denominator = 1 - (tax + margin) / 100;
+  const valid = denominator > 0;
+  const price = valid ? baseCost / denominator : 0;
+
+  const taxAmount = (price * tax) / 100;
+  const grossProfit = price - baseCost - taxAmount;
+
+  const asPercent = (value) =>
+    `${Number(value).toLocaleString('pt-BR', {
+      maximumFractionDigits: 2,
+    })}%`;
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="FORMAÇÃO DE PREÇOS"
+        title="Calculadora de preço"
+        description="Simule um preço de venda com custos, tributos e margem alvo antes de decidir disputar."
+      />
+
+      <div className="calculator-layout">
+        <section className="panel calculator-form">
+          <div className="panel-header">
+            <div>
+              <h2>Dados da sua operação</h2>
+              <p>Preencha os valores para simular um item ou serviço.</p>
+            </div>
+
+            <span className="calculator-icon">
+              <Wallet size={18} />
+            </span>
+          </div>
+
+          <div className="form-grid">
+            <label>
+              Custo de compra / execução (R$)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.cost}
+                onChange={(e) =>
+                  setForm({ ...form, cost: e.target.value })
+                }
+              />
+            </label>
+
+            <label>
+              Impostos e tributos (%)
+              <input
+                type="number"
+                min="0"
+                max="99"
+                step="0.1"
+                value={form.tax}
+                onChange={(e) =>
+                  setForm({ ...form, tax: e.target.value })
+                }
+              />
+            </label>
+
+            <label>
+              Frete e logística (R$)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.freight}
+                onChange={(e) =>
+                  setForm({ ...form, freight: e.target.value })
+                }
+              />
+            </label>
+
+            <label>
+              Outras despesas (R$)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.other}
+                onChange={(e) =>
+                  setForm({ ...form, other: e.target.value })
+                }
+              />
+            </label>
+
+            <label className="full-field">
+              Margem alvo sobre o preço de venda (%)
+              <div className="range-value">
+                <input
+                  type="range"
+                  min="0"
+                  max="60"
+                  step="0.5"
+                  value={form.margin}
+                  onChange={(e) =>
+                    setForm({ ...form, margin: e.target.value })
+                  }
+                />
+                <strong>{asPercent(margin)}</strong>
+              </div>
+            </label>
+          </div>
+
+          <div className="calculation-equation">
+            <span>
+              <CheckCircle2 size={16} /> Custo total considerado
+            </span>
+            <strong>{fmtBRL(baseCost)}</strong>
+          </div>
+
+          <p className="form-note">
+            Estimativa simplificada. Confirme o regime tributário, os custos
+            indiretos e as regras fiscais antes de usar o preço em uma proposta.
+          </p>
+        </section>
+
+        <section className="price-result">
+          <div className="price-result-top">
+            <span>PREÇO DE VENDA SUGERIDO</span>
+            <div className="price-result-icon">
+              <Target size={20} />
+            </div>
+          </div>
+
+          <div className="suggested-price">
+            {valid ? fmtBRL(price) : 'Revise os percentuais'}
+          </div>
+
+          <p>
+            Preço simulado para atingir a margem informada, considerando os
+            dados preenchidos.
+          </p>
+
+          <div className="price-breakdown">
+            <div>
+              <span>Custo + logística + outros</span>
+              <strong>{fmtBRL(baseCost)}</strong>
+            </div>
+            <div>
+              <span>Tributos estimados ({asPercent(tax)})</span>
+              <strong>{fmtBRL(taxAmount)}</strong>
+            </div>
+            <div>
+              <span>Lucro estimado</span>
+              <strong className="profit-amount">{fmtBRL(grossProfit)}</strong>
+            </div>
+          </div>
+
+          <div className="margin-indicator">
+            <div className="margin-indicator-row">
+              <span>Margem sobre a venda</span>
+              <strong>
+                {valid && price
+                  ? asPercent((grossProfit / price) * 100)
+                  : '—'}
+              </strong>
+            </div>
+
+            <div className="progress-track">
+              <div
+                style={{
+                  width: `${Math.min(
+                    100,
+                    Math.max(0, (margin / 60) * 100)
+                  )}%`,
+                }}
+              />
+            </div>
+          </div>
+
+          <button
+            className="button button-light full-button"
+            onClick={() => window.print()}
+          >
+            <FileText size={16} /> Imprimir / salvar como PDF
+          </button>
+        </section>
+      </div>
+
+      <div className="inline-alert price-warning">
+        <AlertCircle size={17} />
+        <span>
+          Não use esse resultado como preço mínimo automático de lance sem
+          validar custos, incidências tributárias, garantias, prazo de
+          pagamento e riscos contratuais.
+        </span>
+      </div>
+    </>
+  );
+}
+
+function OpportunityModal({ initial, onClose, onSave }) {
+  const [form, setForm] = useState(
+    initial
+      ? {
+          ...initial,
+          expectedRevenue: initial.expectedRevenue ?? '',
+          estimatedCost: initial.estimatedCost ?? '',
+          taxPercent: String(initial.taxPercent ?? '0'),
+        }
+      : {
+          id: uid(),
+          title: '',
+          category: '',
+          agency: '',
+          location: 'CE',
+          modality: 'Pregão eletrônico',
+          amount: '',
+          expectedRevenue: '',
+          estimatedCost: '',
+          taxPercent: '0',
+          deadline: '',
+          status: 'Em análise',
+          source: 'Manual',
+          url: '',
+          tasks: [],
+        }
+  );
+
+  const update = (key, value) =>
+    setForm((current) => ({ ...current, [key]: value }));
+
+  const submit = (event) => {
+    event.preventDefault();
+
+    onSave({
+      ...form,
+      deadline: form.deadline
+        ? new Date(form.deadline).toISOString()
+        : '',
+    });
+  };
+
+  const deadlineValue = toDateTimeLocalValue(form.deadline);
+
+  return (
+    <Modal
+      title={initial ? 'Editar oportunidade' : 'Cadastrar oportunidade'}
+      subtitle="Organize os dados do edital e, quando disponível, a projeção financeira da sua proposta."
+      onClose={onClose}
+      wide
+    >
+      <form className="form-stack modal-form" onSubmit={submit}>
+        <label>
+          Objeto / título do edital
+          <input
+            required
+            value={form.title}
+            onChange={(e) => update('title', e.target.value)}
+            placeholder="Ex.: Fornecimento de material de expediente"
+          />
+        </label>
+
+        <label>
+          Órgão / entidade
+          <input
+            required
+            value={form.agency}
+            onChange={(e) => update('agency', e.target.value)}
+            placeholder="Nome do órgão público"
+          />
+        </label>
+
+        <div className="form-grid">
+          <label>
+            Ramo / categoria
+            <input
+              required
+              value={form.category}
+              onChange={(e) => update('category', e.target.value)}
+              placeholder="Ex.: Tecnologia"
+            />
+          </label>
+
+          <label>
+            Valor estimado do edital (R$)
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.amount}
+              onChange={(e) => update('amount', e.target.value)}
+              placeholder="0,00"
+            />
+          </label>
+
+          <label>
+            Receita prevista da sua proposta (R$)
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={form.expectedRevenue ?? ''}
+              onChange={(e) => update('expectedRevenue', e.target.value)}
+              placeholder="Valor previsto de recebimento"
+            />
+            <small>
+              Use o valor da proposta da empresa, não necessariamente o valor
+              máximo do edital.
+            </small>
+          </label>
+
+          <label>
+            Custo total previsto (R$)
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.estimatedCost ?? ''}
+              onChange={(e) => update('estimatedCost', e.target.value)}
+              placeholder="Compra, execução e despesas"
+            />
+            <small>
+              Inclua custos de compra ou execução, frete e despesas indiretas.
+            </small>
+          </label>
+
+          <label>
+            Tributos estimados (%)
+            <input
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              value={form.taxPercent ?? '0'}
+              onChange={(e) => update('taxPercent', e.target.value)}
+            />
+          </label>
+
+          <label>
+            Estado (UF)
+            <select
+              value={form.location}
+              onChange={(e) => update('location', e.target.value)}
+            >
+              {'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'
+                .split(' ')
+                .map((uf) => (
+                  <option key={uf}>{uf}</option>
+                ))}
+            </select>
+          </label>
+
+          <label>
+            Modalidade
+            <select
+              value={form.modality}
+              onChange={(e) => update('modality', e.target.value)}
+            >
+              <option>Pregão eletrônico</option>
+              <option>Concorrência eletrônica</option>
+              <option>Dispensa de licitação</option>
+              <option>Inexigibilidade</option>
+              <option>Credenciamento</option>
+              <option>Leilão eletrônico</option>
+              <option>Outra</option>
+            </select>
+          </label>
+
+          <label>
+            Prazo / sessão
+            <input
+              type="datetime-local"
+              value={deadlineValue}
+              onChange={(e) => update('deadline', e.target.value)}
+            />
+          </label>
+
+          <label>
+            Etapa atual
+            <select
+              value={form.status}
+              onChange={(e) => update('status', e.target.value)}
+            >
+              {statusOptions.map((status) => (
+                <option key={status}>{status}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <label>
+          Link do edital ou da fonte (opcional)
+          <input
+            type="url"
+            value={form.url || ''}
+            onChange={(e) => update('url', e.target.value)}
+            placeholder="https://..."
+          />
+        </label>
+
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={onClose}
+          >
+            Cancelar
+          </button>
+
+          <PrimaryButton type="submit" icon={Check}>
+            {initial ? 'Salvar alterações' : 'Adicionar ao radar'}
+          </PrimaryButton>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function TaskModal({ opportunities, onClose, onSave }) {
+  const [form, setForm] = useState({
+    title: '',
+    date: todayISO(),
+    priority: 'Média',
+    linked: '',
+  });
+
+  const submit = (event) => {
+    event.preventDefault();
+    onSave(form);
+  };
+
+  return (
+    <Modal
+      title="Nova tarefa"
+      subtitle="Defina a próxima ação e a data para realizá-la."
+      onClose={onClose}
+    >
+      <form className="form-stack modal-form" onSubmit={submit}>
+        <label>
+          O que precisa ser feito?
+          <input
+            required
+            value={form.title}
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            placeholder="Ex.: Conferir certidões"
+          />
+        </label>
+
+        <label>
+          Data limite
+          <input
+            type="date"
+            value={form.date}
+            onChange={(e) => setForm({ ...form, date: e.target.value })}
+          />
+        </label>
+
+        <label>
+          Prioridade
+          <select
+            value={form.priority}
+            onChange={(e) => setForm({ ...form, priority: e.target.value })}
+          >
+            <option>Baixa</option>
+            <option>Média</option>
+            <option>Alta</option>
+          </select>
+        </label>
+
+        <label>
+          Vincular a um processo (opcional)
+          <select
+            value={form.linked}
+            onChange={(e) => setForm({ ...form, linked: e.target.value })}
+          >
+            <option value="">Sem vínculo</option>
+            {opportunities.map((item) => (
+              <option value={item.id} key={item.id}>
+                {item.title}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={onClose}
+          >
+            Cancelar
+          </button>
+
+          <PrimaryButton type="submit" icon={Plus}>
+            Criar tarefa
+          </PrimaryButton>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function SettingsModal({ profile, onClose, onSave, onReset }) {
+  const [company, setCompany] = useState(profile.company || 'Minha empresa');
+  const [branches, setBranches] = useState((profile.branches || []).join(', '));
+  const [uf, setUf] = useState(profile.uf || 'CE');
+
+  const submit = (event) => {
+    event.preventDefault();
+
+    onSave({
+      company: company.trim() || 'Minha empresa',
+      branches: [
+        ...new Set(
+          branches.split(',').map((branch) => branch.trim()).filter(Boolean)
+        ),
+      ],
+      uf,
+    });
+  };
+
+  return (
+    <Modal
+      title="Configurações da empresa"
+      subtitle="Personalize o ambiente da empresa e os ramos usados no filtro do Radar."
+      onClose={onClose}
+    >
+      <form className="form-stack modal-form" onSubmit={submit}>
+        <label>
+          Nome da empresa
+          <input
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            required
+          />
+        </label>
+
+        <label>
+          Ramos de atuação
+          <span className="field-help">
+            Separe os ramos por vírgula. Ex.: Informática, Material de expediente,
+            Alimentos.
+          </span>
+          <textarea
+            value={branches}
+            onChange={(e) => setBranches(e.target.value)}
+            rows="4"
+            placeholder="Tecnologia, materiais, serviços..."
+          />
+        </label>
+
+        <label>
+          Estado principal
+          <select value={uf} onChange={(e) => setUf(e.target.value)}>
+            {'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'
+              .split(' ')
+              .map((item) => (
+                <option key={item}>{item}</option>
+              ))}
+          </select>
+        </label>
+
+        <div className="modal-actions">
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={onClose}
+          >
+            Cancelar
+          </button>
+
+          <PrimaryButton type="submit" icon={Check}>
+            Salvar
+          </PrimaryButton>
+        </div>
+
+        <div className="reset-area">
+          <button type="button" className="text-danger" onClick={onReset}>
+            Restaurar dados de demonstração
+          </button>
+          <span>Faça backup antes de substituir dados existentes.</span>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function HelpModal({ onClose }) {
+  return (
+    <Modal
+      title="Sobre o Licita360"
+      subtitle="Central de inteligência e gestão de licitações."
+      onClose={onClose}
+    >
+      <div className="help-content">
+        <div className="help-feature">
+          <div><Radar size={20} /></div>
+          <p>
+            <strong>Radar e PNCP</strong>
+            <br />
+            Consulte oportunidades publicadas no PNCP e filtre os resultados
+            pelos ramos cadastrados.
+          </p>
+        </div>
+
+        <div className="help-feature">
+          <div><FileCheck2 size={20} /></div>
+          <p>
+            <strong>Dados e documentos</strong>
+            <br />
+            Os metadados são enviados à API e armazenados no PostgreSQL.
+            O arquivo físico ainda não é enviado nesta versão.
+          </p>
+        </div>
+
+        <div className="help-feature">
+          <div><Wallet size={20} /></div>
+          <p>
+            <strong>Preço simulado</strong>
+            <br />
+            A calculadora é um apoio e não substitui análise tributária e de custos.
+          </p>
+        </div>
+
+        <div className="inline-alert price-warning">
+          <AlertCircle size={17} />
+          <span>
+            Esta versão ainda não tem autenticação de usuários, armazenamento
+            seguro de arquivos, análise de PDFs por IA nem automação de lances.
+          </span>
+        </div>
+
+        <button
+          className="button button-primary full-button"
+          onClick={onClose}
+        >
+          Entendi
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function Modal({ title, subtitle, onClose, children, wide = false }) {
+  useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+
+    window.addEventListener('keydown', onKey);
+
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="modal-scrim"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        className={`modal ${wide ? 'modal-wide' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="modal-header">
+          <div>
+            <h2>{title}</h2>
+            <p>{subtitle}</p>
+          </div>
+
+          <button
+            className="icon-button"
+            onClick={onClose}
+            aria-label="Fechar"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="modal-body">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);

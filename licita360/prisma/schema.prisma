@@ -1,0 +1,253 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String   @default("Minha empresa")
+  cnpj      String?  @unique
+  uf        String   @default("CE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  branches      CompanyBranch[]
+  opportunities Opportunity[]
+  tasks         Task[]
+  documents     Document[]
+
+  // Recursos do Licita360
+  partners            PartnerCompany[]          @relation("OwnedPartnerCompanies")
+  prospectingSettings ProspectingSettings?
+  discoveries         DiscoveredOpportunity[]
+  partnerMatches      PartnerOpportunityMatch[] @relation("CompanyPartnerMatches")
+  notifications       NotificationLog[]
+}
+
+model ProspectingSettings {
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  // Automação e destinatário dos alertas
+  enabled        Boolean @default(false)
+  recipientEmail String?
+
+  dailyEmailEnabled     Boolean @default(true)
+  documentAlertsEnabled Boolean @default(true)
+  partnerAlertsEnabled  Boolean @default(true)
+
+  // Filtros gerais de prospecção
+  ufs        String[] @default(["CE"])
+  modalities String[] @default(["8"])
+  daysAhead  Int      @default(30)
+  minAmount  Decimal? @db.Decimal(14, 2)
+  maxAmount  Decimal? @db.Decimal(14, 2)
+
+  // Dias para emissão de alertas documentais
+  documentAlertDays Int[] @default([30, 15, 7, 1, 0])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+model PartnerCompany {
+  id             String @id @default(cuid())
+  ownerCompanyId String
+
+  name        String
+  cnpj        String?
+  contactName String?
+  email       String?
+  phone       String?
+
+  uf     String   @default("CE")
+  cities String[] @default([])
+
+  minimumAmount Decimal? @db.Decimal(14, 2)
+  maximumAmount Decimal? @db.Decimal(14, 2)
+
+  active              Boolean @default(true)
+  notifyOpportunities Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ownerCompany Company @relation("OwnedPartnerCompanies", fields: [ownerCompanyId], references: [id], onDelete: Cascade)
+
+  branches PartnerBranch[]
+  matches  PartnerOpportunityMatch[]
+
+  @@unique([ownerCompanyId, cnpj])
+  @@index([ownerCompanyId, active])
+}
+
+model PartnerBranch {
+  id        String @id @default(cuid())
+  partnerId String
+  name      String
+
+  partner PartnerCompany @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, name])
+}
+
+model DiscoveredOpportunity {
+  id        String @id @default(cuid())
+  companyId String
+  pncpId    String
+
+  title    String
+  agency   String
+  unit     String?
+  city     String?
+  uf       String?
+  modality String
+
+  amount   Decimal?  @db.Decimal(14, 2)
+  deadline DateTime?
+  url      String?
+  raw      Json?
+
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  matches PartnerOpportunityMatch[]
+
+  @@unique([companyId, pncpId])
+  @@index([companyId, firstSeenAt])
+  @@index([deadline])
+}
+
+model PartnerOpportunityMatch {
+  id          String @id @default(cuid())
+  companyId   String
+  partnerId   String
+  discoveryId String
+
+  matchedBranches String[]  @default([])
+  reason          String?
+  notifiedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  company Company @relation("CompanyPartnerMatches", fields: [companyId], references: [id], onDelete: Cascade)
+
+  partner PartnerCompany @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  discovery DiscoveredOpportunity @relation(fields: [discoveryId], references: [id], onDelete: Cascade)
+
+  @@unique([partnerId, discoveryId])
+  @@index([companyId, createdAt])
+  @@index([partnerId, notifiedAt])
+}
+
+model NotificationLog {
+  id        String @id @default(cuid())
+  companyId String
+  type      String
+  dedupeKey String
+
+  recipientEmail String?
+  subject        String
+  status         String    @default("pending")
+  error          String?
+  metadata       Json?
+  sentAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, dedupeKey])
+  @@index([companyId, type, createdAt])
+}
+
+model CompanyBranch {
+  id        String @id @default(cuid())
+  name      String
+  companyId String
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, name])
+}
+
+model Opportunity {
+  id              String    @id
+  companyId       String
+  sourceId        String?
+  title           String
+  category        String
+  agency          String
+  location        String?
+  modality        String
+  amount          Decimal   @default(0) @db.Decimal(14, 2)
+  expectedRevenue Decimal?  @db.Decimal(14, 2)
+  estimatedCost   Decimal?  @db.Decimal(14, 2)
+  taxPercent      Decimal   @default(0) @db.Decimal(5, 2)
+  deadline        DateTime?
+  status          String    @default("Em análise")
+  source          String    @default("Manual")
+  url             String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  checklistTasks ChecklistTask[]
+  tasks          Task[]
+
+  @@unique([companyId, sourceId])
+  @@index([companyId, status])
+  @@index([deadline])
+}
+
+model ChecklistTask {
+  id            String  @id
+  opportunityId String
+  title         String
+  done          Boolean @default(false)
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+}
+
+model Task {
+  id            String    @id
+  companyId     String
+  title         String
+  date          DateTime?
+  priority      String    @default("Média")
+  done          Boolean   @default(false)
+  opportunityId String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  company     Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  opportunity Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, done])
+  @@index([date])
+}
+
+model Document {
+  id         String    @id
+  companyId  String
+  name       String
+  type       String
+  expires    DateTime?
+  status     String    @default("Em dia")
+  fileName   String?
+  storageKey String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, expires])
+}

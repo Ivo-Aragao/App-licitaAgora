@@ -1,0 +1,185 @@
+{
+  "updatedAt": "2026-10-15T16:59:32.995Z",
+  "data": {
+    "opportunities": [
+      {
+        "id": "op-101",
+        "title": "Aquisição de materiais de expediente",
+        "category": "Material de escritório",
+        "agency": "Prefeitura Municipal de Fortaleza",
+        "location": "CE",
+        "modality": "Pregão eletrônico",
+        "amount": 84500,
+        "deadline": "2026-10-22T14:00:00",
+        "status": "Em análise",
+        "source": "Demonstração",
+        "url": "",
+        "tasks": [
+          {
+            "id": "t1",
+            "title": "Revisar exigências técnicas",
+            "done": true
+          },
+          {
+            "id": "t2",
+            "title": "Solicitar cotação a fornecedores",
+            "done": false
+          },
+          {
+            "id": "t3",
+            "title": "Conferir certidões",
+            "done": false
+          }
+        ]
+      },
+      {
+        "id": "op-102",
+        "title": "Serviços de manutenção predial",
+        "category": "Prestação de serviços",
+        "agency": "Secretaria de Administração",
+        "location": "CE",
+        "modality": "Concorrência eletrônica",
+        "amount": 275000,
+        "deadline": "2026-10-25T09:00:00",
+        "status": "Documentação",
+        "source": "Demonstração",
+        "url": "",
+        "tasks": [
+          {
+            "id": "t4",
+            "title": "Conferir atestado técnico",
+            "done": false
+          },
+          {
+            "id": "t5",
+            "title": "Analisar planilha de custos",
+            "done": true
+          }
+        ]
+      },
+      {
+        "id": "op-103",
+        "title": "Equipamentos de informática",
+        "category": "Tecnologia",
+        "agency": "Instituto Federal — unidade regional",
+        "location": "PE",
+        "modality": "Pregão eletrônico",
+        "amount": 132800,
+        "deadline": "2026-10-28T10:00:00",
+        "status": "Preparar proposta",
+        "source": "Demonstração",
+        "url": "",
+        "tasks": [
+          {
+            "id": "t6",
+            "title": "Cotação de equipamentos",
+            "done": true
+          },
+          {
+            "id": "t7",
+            "title": "Validar garantia mínima",
+            "done": false
+          }
+        ]
+      },
+      {
+        "id": "op-104",
+        "title": "Fornecimento de gêneros alimentícios",
+        "category": "Alimentos",
+        "agency": "Consórcio Público Regional",
+        "location": "PB",
+        "modality": "Pregão eletrônico",
+        "amount": 196400,
+        "deadline": "2026-11-03T08:30:00",
+        "status": "Monitorar",
+        "source": "Demonstração",
+        "url": "",
+        "tasks": [
+          {
+            "id": "t8",
+            "title": "Verificar locais de entrega",
+            "done": false
+          }
+        ]
+      }
+    ],
+    "tasks": [
+      {
+        "id": "task-1",
+        "title": "Revisar edital de materiais de expediente",
+        "date": "2026-10-16",
+        "priority": "Alta",
+        "done": true,
+        "linked": "op-101"
+      },
+      {
+        "id": "task-2",
+        "title": "Pedir nova cotação de frete",
+        "date": "2026-10-16",
+        "priority": "Média",
+        "done": true,
+        "linked": "op-102"
+      },
+      {
+        "id": "task-3",
+        "title": "Atualizar certidão estadual",
+        "date": "2026-10-19",
+        "priority": "Alta",
+        "done": true,
+        "linked": ""
+      },
+      {
+        "id": "task-4",
+        "title": "Conferir documentação da proposta de TI",
+        "date": "2026-10-20",
+        "priority": "Baixa",
+        "done": true,
+        "linked": "op-103"
+      }
+    ],
+    "documents": [
+      {
+        "id": "doc-1",
+        "name": "Contrato social consolidado",
+        "type": "Societário",
+        "expires": "2027-05-30",
+        "status": "Em dia",
+        "fileName": ""
+      },
+      {
+        "id": "doc-2",
+        "name": "Certidão conjunta federal",
+        "type": "Certidão",
+        "expires": "2026-11-12",
+        "status": "Atenção",
+        "fileName": ""
+      },
+      {
+        "id": "doc-3",
+        "name": "Certidão estadual",
+        "type": "Certidão",
+        "expires": "2026-10-19",
+        "status": "Vence em breve",
+        "fileName": ""
+      },
+      {
+        "id": "doc-4",
+        "name": "Balanço patrimonial",
+        "type": "Contábil",
+        "expires": "2027-04-30",
+        "status": "Em dia",
+        "fileName": ""
+      }
+    ],
+    "profile": {
+      "company": "Minha empresa",
+      "branches": [
+        "Material de escritório",
+        "Tecnologia",
+        "Prestação de serviços",
+        "Alimentos"
+      ],
+      "uf": "CE"
+    }
+  }
+}
