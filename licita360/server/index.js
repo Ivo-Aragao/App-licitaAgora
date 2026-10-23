@@ -769,20 +769,24 @@ const automation = registerAutomation({
   getDefaultCompany,
 });
 
-const server = app.listen(PORT, () => {
-  console.log(
-    `Licita360 API disponível em http://localhost:${PORT}`
-  );
-});
-
-async function shutdown() {
-  automation.stop();
-
-  server.close(async () => {
-    await prisma.$disconnect();
-    process.exit(0);
+if (process.env.VERCEL !== '1') {
+  const server = app.listen(PORT, () => {
+    console.log(
+      `Licita360 API disponível em http://localhost:${PORT}`
+    );
   });
+
+  async function shutdown() {
+    automation.stop();
+
+    server.close(async () => {
+      await prisma.$disconnect();
+      process.exit(0);
+    });
+  }
+
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
 
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+export default app;

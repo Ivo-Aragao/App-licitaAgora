@@ -1630,7 +1630,15 @@ export function registerAutomation({
     }
   });
 
-  const routineTask = cron.schedule(
+  const scheduleLocalCron = (...args) => {
+  if (process.env.VERCEL === '1') {
+    return null;
+  }
+
+  return cron.schedule(...args);
+};
+
+  const routineTask = scheduleLocalCron(
     '*/30 * * * *',
     () => {
       enqueue(() => runAllCompanies())
@@ -1639,7 +1647,8 @@ export function registerAutomation({
     { timezone: TIME_ZONE }
   );
 
-  const dailyTask = cron.schedule(
+  
+  const dailyTask = scheduleLocalCron(
     '0 8 * * *',
     () => {
       enqueue(() => runAllCompanies({ dailyDigest: true }))
@@ -1663,9 +1672,9 @@ export function registerAutomation({
   })();
 
   return {
-    stop() {
-      routineTask.stop();
-      dailyTask.stop();
-    },
-  };
+  stop() {
+    routineTask?.stop();
+    dailyTask?.stop();
+  },
+};
 }

@@ -627,54 +627,56 @@ function App() {
 
     loadFromServer();
 
-    useEffect(() => {
-  let cancelled = false;
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-  async function loadAutomationData() {
-    try {
-      const [settingsResponse, partnersResponse] = await Promise.all([
-        fetch('/api/automation/settings'),
-        fetch('/api/partners'),
-      ]);
+  // Carrega configurações de automação e empresas parceiras.
+  useEffect(() => {
+    let cancelled = false;
 
-      const settingsPayload = await settingsResponse.json();
-      const partnersPayload = await partnersResponse.json();
+    async function loadAutomationData() {
+      try {
+        const [settingsResponse, partnersResponse] = await Promise.all([
+          fetch('/api/automation/settings'),
+          fetch('/api/partners'),
+        ]);
 
-      if (!settingsResponse.ok) {
-        throw new Error(
-          settingsPayload.error || 'Não foi possível carregar as configurações.'
+        const settingsPayload = await settingsResponse.json();
+        const partnersPayload = await partnersResponse.json();
+
+        if (!settingsResponse.ok) {
+          throw new Error(
+            settingsPayload.error || 'Não foi possível carregar as configurações.'
+          );
+        }
+
+        if (!partnersResponse.ok) {
+          throw new Error(
+            partnersPayload.error || 'Não foi possível carregar os parceiros.'
+          );
+        }
+
+        if (cancelled) return;
+
+        setAutomationSettings(settingsPayload.settings);
+        setPartners(
+          Array.isArray(partnersPayload.partners)
+            ? partnersPayload.partners
+            : []
         );
-      }
 
-      if (!partnersResponse.ok) {
-        throw new Error(
-          partnersPayload.error || 'Não foi possível carregar os parceiros.'
-        );
-      }
-
-      if (cancelled) return;
-
-      setAutomationSettings(settingsPayload.settings);
-      setPartners(
-        Array.isArray(partnersPayload.partners)
-          ? partnersPayload.partners
-          : []
-      );
-
-      setAutomationError('');
-    } catch (error) {
-      if (!cancelled) {
-        setAutomationError(error.message);
+        setAutomationError('');
+      } catch (error) {
+        if (!cancelled) {
+          setAutomationError(error.message);
+        }
       }
     }
-  }
 
-  loadAutomationData();
+    loadAutomationData();
 
-  return () => {
-    cancelled = true;
-  };
-}, []);
     return () => {
       cancelled = true;
     };
@@ -1037,6 +1039,147 @@ function App() {
 
   const editNew = () =>
     setModal({ type: 'opportunity', initial: null });
+
+  // Salva uma empresa parceira e atualiza a lista exibida na tela.
+  async function persistPartner(partner) {
+    const editing = Boolean(partner.id);
+
+    try {
+      const response = await fetch(
+        editing
+          ? `/api/partners/${encodeURIComponent(partner.id)}`
+          : '/api/partners',
+        {
+          method: editing ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(partner),
+        }
+      );
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || 'Não foi possível salvar a empresa parceira.');
+      }
+
+      const listResponse = await fetch('/api/partners');
+      const listPayload = await listResponse.json().catch(() => ({}));
+      if (!listResponse.ok) {
+        throw new Error(listPayload.error || 'A empresa foi salva, mas não foi possível atualizar a lista.');
+      }
+
+      setPartners(Array.isArray(listPayload.partners) ? listPayload.partners : []);
+      setToast(editing ? 'Empresa parceira atualizada.' : 'Empresa parceira cadastrada.');
+      return true;
+    } catch (error) {
+      console.error('Falha ao salvar empresa parceira:', error);
+      setToast(error.message || 'Erro ao salvar empresa parceira.');
+      return false;
+    }
+  }
+
+  // Remove uma empresa parceira após confirmação.
+  async function removePartner(id) {
+    if (!confirm('Deseja realmente excluir esta empresa parceira?')) return;
+
+    try {
+      const response = await fetch(`/api/partners/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Não foi possível excluir a empresa parceira.');
+      }
+
+      setPartners((current) => current.filter((partner) => partner.id !== id));
+      setToast('Empresa parceira excluída.');
+    } catch (error) {
+      console.error('Falha ao excluir empresa parceira:', error);
+      setToast(error.message || 'Erro ao excluir empresa parceira.');
+    }
+  }
+
+  // Persiste as preferências de alertas na API.
+  async function saveAutomationSettings(settings) {
+    setAutomationBusy(true);
+    setAutomationError('');
+
+    try {
+      const response = await fetch('/api/automation/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Não foi possível salvar as configurações de alertas.');
+      }
+
+      setAutomationSettings(payload.settings || settings);
+      setAutomationError('');
+      setToast('Preferências de alertas salvas.');
+      return true;
+    } catch (error) {
+      console.error('Falha ao salvar configurações de alertas:', error);
+      setAutomationError(error.message || 'Erro ao salvar as configurações.');
+      return false;
+    } finally {
+      setAutomationBusy(false);
+    }
+  }
+
+  // Solicita à API a execução imediata da rotina de prospecção.
+  async function runAutomationNow() {
+    if (automationBusy) return;
+
+    setAutomationBusy(true);
+    setAutomationError('');
+
+    try {
+      const response = await fetch('/api/automation/run', { method: 'POST' });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Não foi possível executar a prospecção.');
+      }
+
+      setAutomationError('');
+      setToast(payload.message || 'Execução da prospecção concluída.');
+    } catch (error) {
+      console.error('Falha na execução da prospecção:', error);
+      setAutomationError(error.message || 'Erro ao executar a prospecção.');
+    } finally {
+      setAutomationBusy(false);
+    }
+  }
+
+  // Solicita o envio de um e-mail de teste com as configurações salvas.
+  async function sendTestEmail() {
+    if (automationBusy) return;
+
+    setAutomationBusy(true);
+    setAutomationError('');
+
+    try {
+      const response = await fetch('/api/automation/test-email', {
+        method: 'POST',
+      });
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(payload.error || 'Não foi possível enviar o e-mail de teste.');
+      }
+
+      setAutomationError('');
+      setToast(payload.message || 'Solicitação de e-mail de teste concluída.');
+    } catch (error) {
+      console.error('Falha no envio do e-mail de teste:', error);
+      setAutomationError(error.message || 'Erro ao enviar o e-mail de teste.');
+    } finally {
+      setAutomationBusy(false);
+    }
+  }
 
   return (
     <div className="app-shell">
