@@ -1,135 +1,424 @@
+import 'dotenv/config';
 import express from 'express';
-import {
-  mkdir,
-  readFile,
-  rename,
-  writeFile,
-} from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 
+import { getCurrentAuthUser, registerAuthRoutes } from './auth.js';
+import { registerAutomation } from './automation.js';
+
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL não configurada. Confira o arquivo .env.');
+}
+
+const adapter = new PrismaPg({
+  connectionString: process.env.DATABASE_URL,
+});
+
+const prisma = new PrismaClient({ adapter });
 const app = express();
+
 const PORT = Number(process.env.API_PORT || 8787);
 const PNCP_BASE = 'https://pncp.gov.br/api/consulta';
+const DEFAULT_COMPANY_ID = 'licita360-default-company';
 
-// O armazenamento fica dentro da pasta do servidor,
-// independentemente da pasta usada para iniciar o comando.
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(SERVER_DIR, 'data');
-const DATA_FILE = join(DATA_DIR, 'licita360-data.json');
+const LEGACY_FILE = join(SERVER_DIR, 'data', 'licita360-data.json');
 
 app.use(express.json({ limit: '2mb' }));
 
-// Garante que gravações simultâneas sejam processadas em sequência.
-let writeQueue = Promise.resolve();
+// Registra as rotas públicas de autenticação.
+// O middleware retornado será usado para proteger as APIs privadas.
+const requireAuth = registerAuthRoutes(app, prisma);
 
-app.get('/api/health', (_req, res) => {
-  res.json({
-    ok: true,
-    name: 'Licita360 API',
-    time: new Date().toISOString(),
+app.use('/api/data', requireAuth);
+app.use('/api/partners', requireAuth);
+app.use('/api/automation', requireAuth);
+
+function toNullableDate(value) {
+  if (!value) return null;
+
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function toNullableNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : null;
+}
+
+function toNumber(value, fallback = 0) {
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function toText(value, fallback = '') {
+  if (value === null || value === undefined) return fallback;
+
+  return String(value).trim();
+}
+
+function toDateTimeString(value) {
+  return value ? value.toISOString() : '';
+}
+
+function toDateOnlyString(value) {
+  return value ? value.toISOString().slice(0, 10) : '';
+}
+
+function isValidSnapshot(body) {
+  return Boolean(
+    body &&
+      typeof body === 'object' &&
+      Array.isArray(body.opportunities) &&
+      Array.isArray(body.tasks) &&
+      Array.isArray(body.documents) &&
+      body.profile &&
+      typeof body.profile === 'object' &&
+      !Array.isArray(body.profile)
+  );
+}
+
+// Para requisições autenticadas, usa a empresa vinculada ao usuário.
+// O fallback mantém compatibilidade com rotinas antigas sem requisição HTTP.
+async function getDefaultCompany(req) {
+  const authenticatedUser = req?.user || getCurrentAuthUser();
+
+  if (authenticatedUser?.companyId) {
+    return prisma.company.findUniqueOrThrow({
+      where: { id: authenticatedUser.companyId },
+    });
+  }
+
+  return prisma.company.upsert({
+    where: { id: DEFAULT_COMPANY_ID },
+    update: {},
+    create: {
+      id: DEFAULT_COMPANY_ID,
+      name: 'Minha empresa',
+      uf: 'CE',
+    },
   });
-});
+}
 
-// Lê o arquivo salvo. Se ainda não existir, retorna null.
-async function readSavedData() {
-  try {
-    const contents = await readFile(DATA_FILE, 'utf8');
-    return JSON.parse(contents);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return null;
+async function replaceCompanySnapshot(companyId, body) {
+  if (!isValidSnapshot(body)) {
+    throw new Error('O formato dos dados recebidos é inválido.');
+  }
+
+  const profile = body.profile;
+
+  const branches = [
+    ...new Set(
+      (Array.isArray(profile.branches) ? profile.branches : [])
+        .map((branch) => toText(branch))
+        .filter(Boolean)
+    ),
+  ];
+
+  const opportunityIds = new Set(
+    body.opportunities.map((item) => toText(item.id)).filter(Boolean)
+  );
+
+  await prisma.$transaction(async (tx) => {
+    await tx.task.deleteMany({ where: { companyId } });
+    await tx.document.deleteMany({ where: { companyId } });
+    await tx.opportunity.deleteMany({ where: { companyId } });
+    await tx.companyBranch.deleteMany({ where: { companyId } });
+
+    await tx.company.update({
+      where: { id: companyId },
+      data: {
+        name: toText(profile.company, 'Minha empresa') || 'Minha empresa',
+        uf: toText(profile.uf, 'CE') || 'CE',
+      },
+    });
+
+    if (branches.length) {
+      await tx.companyBranch.createMany({
+        data: branches.map((name) => ({ name, companyId })),
+      });
     }
 
-    throw error;
-  }
+    for (const item of body.opportunities) {
+      const checklist = Array.isArray(item.tasks) ? item.tasks : [];
+
+      const checklistTasks = checklist.map((task) => ({
+        id: toText(task.id) || randomUUID(),
+        title: toText(task.title, 'Tarefa sem título'),
+        done: Boolean(task.done),
+      }));
+
+      await tx.opportunity.create({
+        data: {
+          id: toText(item.id) || randomUUID(),
+          companyId,
+          sourceId: toText(item.sourceId) || null,
+          title: toText(item.title, 'Sem título'),
+          category: toText(item.category, 'Sem categoria'),
+          agency: toText(item.agency, 'Órgão não informado'),
+          location: toText(item.location) || null,
+          modality: toText(item.modality, 'Modalidade não informada'),
+          amount: Math.max(0, toNumber(item.amount)),
+          expectedRevenue: toNullableNumber(item.expectedRevenue),
+          estimatedCost: toNullableNumber(item.estimatedCost),
+          taxPercent: Math.max(0, toNumber(item.taxPercent)),
+          deadline: toNullableDate(item.deadline),
+          status: toText(item.status, 'Em análise'),
+          source: toText(item.source, 'Manual'),
+          url: toText(item.url) || null,
+          checklistTasks: {
+            create: checklistTasks,
+          },
+        },
+      });
+    }
+
+    for (const item of body.tasks) {
+      const linkedId = toText(item.linked);
+
+      await tx.task.create({
+        data: {
+          id: toText(item.id) || randomUUID(),
+          companyId,
+          title: toText(item.title, 'Tarefa sem título'),
+          date: toNullableDate(item.date),
+          priority: toText(item.priority, 'Média'),
+          done: Boolean(item.done),
+          opportunityId: opportunityIds.has(linkedId) ? linkedId : null,
+        },
+      });
+    }
+
+    for (const item of body.documents) {
+      await tx.document.create({
+        data: {
+          id: toText(item.id) || randomUUID(),
+          companyId,
+          name: toText(item.name, 'Documento sem nome'),
+          type: toText(item.type, 'Outro'),
+          expires: toNullableDate(item.expires),
+          status: toText(item.status, 'Em dia'),
+          fileName: toText(item.fileName) || null,
+        },
+      });
+    }
+  });
 }
 
-// Grava primeiro em um arquivo temporário e depois o substitui.
-// A fila ajuda a evitar que duas alterações se sobrescrevam.
-function persistData(record) {
-  const operation = writeQueue
-    .catch(() => {})
-    .then(async () => {
-      await mkdir(DATA_DIR, { recursive: true });
+async function readCompanySnapshot(companyId) {
+  const [company, branches, opportunities, tasks, documents] =
+    await Promise.all([
+      prisma.company.findUniqueOrThrow({
+        where: { id: companyId },
+      }),
+      prisma.companyBranch.findMany({
+        where: { companyId },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.opportunity.findMany({
+        where: { companyId },
+        include: { checklistTasks: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.task.findMany({
+        where: { companyId },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.document.findMany({
+        where: { companyId },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
 
-      const temporaryFile = `${DATA_FILE}.tmp`;
+  const data = {
+    opportunities: opportunities.map((item) => ({
+      id: item.id,
+      sourceId: item.sourceId,
+      title: item.title,
+      category: item.category,
+      agency: item.agency,
+      location: item.location || '',
+      modality: item.modality,
+      amount: Number(item.amount),
+      expectedRevenue:
+        item.expectedRevenue === null ? '' : Number(item.expectedRevenue),
+      estimatedCost:
+        item.estimatedCost === null ? '' : Number(item.estimatedCost),
+      taxPercent: Number(item.taxPercent),
+      deadline: toDateTimeString(item.deadline),
+      status: item.status,
+      source: item.source,
+      url: item.url || '',
+      tasks: item.checklistTasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        done: task.done,
+      })),
+    })),
 
-      await writeFile(
-        temporaryFile,
-        JSON.stringify(record, null, 2),
-        'utf8'
-      );
+    tasks: tasks.map((item) => ({
+      id: item.id,
+      title: item.title,
+      date: toDateOnlyString(item.date),
+      priority: item.priority,
+      done: item.done,
+      linked: item.opportunityId || '',
+    })),
 
-      await rename(temporaryFile, DATA_FILE);
-    });
+    documents: documents.map((item) => ({
+      id: item.id,
+      name: item.name,
+      type: item.type,
+      expires: toDateOnlyString(item.expires),
+      status: item.status,
+      fileName: item.fileName || '',
+    })),
 
-  writeQueue = operation;
-  return operation;
-}
-
-// Recupera os dados persistidos.
-app.get('/api/data', async (_req, res) => {
-  try {
-    const record = await readSavedData();
-
-    res.json({
-      ok: true,
-      data: record?.data ?? null,
-      updatedAt: record?.updatedAt ?? null,
-    });
-  } catch (error) {
-    console.error('Erro ao ler dados do Licita360:', error);
-
-    res.status(500).json({
-      error: 'Não foi possível ler os dados salvos do Licita360.',
-    });
-  }
-});
-
-// Salva os cadastros recebidos da interface.
-app.put('/api/data', async (req, res) => {
-  const body = req.body;
-
-  if (
-    !body ||
-    typeof body !== 'object' ||
-    !Array.isArray(body.opportunities) ||
-    !Array.isArray(body.tasks) ||
-    !Array.isArray(body.documents) ||
-    !body.profile ||
-    typeof body.profile !== 'object' ||
-    Array.isArray(body.profile)
-  ) {
-    return res.status(400).json({
-      error:
-        'Dados inválidos. São esperados oportunidades, tarefas, documentos e perfil.',
-    });
-  }
-
-  const record = {
-    updatedAt: new Date().toISOString(),
-    data: {
-      opportunities: body.opportunities,
-      tasks: body.tasks,
-      documents: body.documents,
-      profile: body.profile,
+    profile: {
+      company: company.name,
+      branches: branches.map((branch) => branch.name),
+      uf: company.uf,
     },
   };
 
+  const hasRecords =
+    opportunities.length > 0 ||
+    tasks.length > 0 ||
+    documents.length > 0 ||
+    branches.length > 0;
+
+  const customProfile =
+    company.name !== 'Minha empresa' || company.uf !== 'CE';
+
+  const timestamps = [
+    company.updatedAt.getTime(),
+    ...opportunities.map((item) => item.updatedAt.getTime()),
+    ...tasks.map((item) => item.updatedAt.getTime()),
+    ...documents.map((item) => item.updatedAt.getTime()),
+  ];
+
+  const updatedAt = new Date(Math.max(...timestamps)).toISOString();
+
+  return {
+    data: hasRecords || customProfile ? data : null,
+    updatedAt,
+  };
+}
+
+let legacyImportPromise;
+
+async function importLegacyIfAvailable(companyId) {
+  if (!legacyImportPromise) {
+    legacyImportPromise = (async () => {
+      try {
+        const contents = await readFile(LEGACY_FILE, 'utf8');
+        const parsed = JSON.parse(contents);
+        const legacyData = parsed.data ?? parsed;
+
+        if (!isValidSnapshot(legacyData)) {
+          console.warn(
+            'Arquivo JSON antigo encontrado, mas o formato não é compatível.'
+          );
+          return false;
+        }
+
+        await replaceCompanySnapshot(companyId, legacyData);
+        console.log('Dados antigos importados do JSON para o PostgreSQL.');
+
+        return true;
+      } catch (error) {
+        if (error.code === 'ENOENT') return false;
+
+        console.error('Falha na importação do JSON antigo:', error);
+        throw error;
+      }
+    })();
+  }
+
+  return legacyImportPromise;
+}
+
+// Verifica se a API está funcionando e se o banco está acessível.
+app.get('/api/health', async (_req, res) => {
   try {
-    await persistData(record);
+    await prisma.$queryRaw`SELECT 1`;
 
     res.json({
       ok: true,
-      updatedAt: record.updatedAt,
-      message: 'Dados salvos com sucesso.',
+      name: 'Licita360 API',
+      database: 'connected',
+      time: new Date().toISOString(),
     });
   } catch (error) {
-    console.error('Erro ao salvar dados do Licita360:', error);
+    console.error('Banco indisponível:', error);
+
+    res.status(503).json({
+      ok: false,
+      name: 'Licita360 API',
+      database: 'disconnected',
+      error: 'Não foi possível acessar o PostgreSQL.',
+    });
+  }
+});
+
+// Carrega os dados da empresa autenticada.
+app.get('/api/data', async (req, res) => {
+  try {
+    const company = await getDefaultCompany(req);
+    let result = await readCompanySnapshot(company.id);
+
+    if (!result.data) {
+      await importLegacyIfAvailable(company.id);
+      result = await readCompanySnapshot(company.id);
+    }
+
+    res.json({
+      ok: true,
+      data: result.data,
+      updatedAt: result.updatedAt,
+    });
+  } catch (error) {
+    console.error('Erro ao ler dados do Prisma:', error);
 
     res.status(500).json({
-      error: 'Não foi possível salvar os dados no servidor.',
+      error: 'Não foi possível carregar os dados do Licita360.',
+    });
+  }
+});
+
+// Salva os dados da empresa autenticada.
+app.put('/api/data', async (req, res) => {
+  if (!isValidSnapshot(req.body)) {
+    return res.status(400).json({
+      error:
+        'Dados inválidos. São esperados opportunities, tasks, documents e profile.',
+    });
+  }
+
+  try {
+    const company = await getDefaultCompany(req);
+
+    await replaceCompanySnapshot(company.id, req.body);
+
+    res.json({
+      ok: true,
+      message: 'Dados salvos no PostgreSQL.',
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Erro ao salvar dados pelo Prisma:', error);
+
+    res.status(500).json({
+      error: 'Não foi possível salvar os dados no PostgreSQL.',
     });
   }
 });
@@ -158,10 +447,6 @@ function toArray(payload) {
   return [];
 }
 
-function cryptoRandomId() {
-  return `pncp-${Math.random().toString(36).slice(2, 12)}`;
-}
-
 function normalizeContract(row) {
   const orgao = row?.orgaoEntidade || row?.orgao || {};
   const unidade = row?.unidadeOrgao || row?.unidadeAdministrativa || {};
@@ -170,7 +455,7 @@ function normalizeContract(row) {
     row?.numeroControlePNCP,
     row?.id,
     row?.sequencialCompra,
-    cryptoRandomId()
+    `pncp-${randomUUID()}`
   );
 
   const title = firstDefined(
@@ -181,12 +466,14 @@ function normalizeContract(row) {
     'Objeto não informado'
   );
 
-  const amount = firstDefined(
+  const amountRaw = firstDefined(
     row?.valorTotalEstimado,
     row?.valorEstimado,
     row?.valorTotalHomologado,
     null
   );
+
+  const amountNumber = amountRaw === null ? null : Number(amountRaw);
 
   const url = firstDefined(
     row?.linkSistemaOrigem,
@@ -194,6 +481,28 @@ function normalizeContract(row) {
     row?.url,
     'https://pncp.gov.br/app/editais'
   );
+
+  const city = String(
+    firstDefined(
+      unidade?.municipioNome,
+      unidade?.nomeMunicipio,
+      row?.municipioNome,
+      row?.nomeMunicipio,
+      ''
+    )
+  ).trim();
+
+  const uf = String(
+    firstDefined(
+      unidade?.ufSigla,
+      unidade?.uf,
+      row?.ufSigla,
+      row?.uf,
+      ''
+    )
+  )
+    .trim()
+    .toUpperCase();
 
   return {
     id: String(id),
@@ -213,7 +522,13 @@ function normalizeContract(row) {
         ''
       )
     ),
-    uf: String(firstDefined(unidade?.uf, row?.uf, '')),
+    city,
+    location: city
+      ? [city, uf].filter(Boolean).join('/')
+      : uf
+        ? `Município não informado/${uf}`
+        : 'Município não informado',
+    uf,
     modality: String(
       firstDefined(
         row?.modalidadeNome,
@@ -221,7 +536,13 @@ function normalizeContract(row) {
         'Modalidade não informada'
       )
     ),
-    amount: amount === null ? null : Number(amount),
+    modalityCode: String(
+      firstDefined(row?.codigoModalidadeContratacao, '')
+    ),
+    amount:
+      amountNumber !== null && Number.isFinite(amountNumber)
+        ? amountNumber
+        : null,
     deadline: firstDefined(
       row?.dataEncerramentoProposta,
       row?.dataFimRecebimentoPropostas,
@@ -234,7 +555,7 @@ function normalizeContract(row) {
   };
 }
 
-// Consulta oficial ao PNCP. Mantida para preservar o Radar existente.
+// Consulta as oportunidades no PNCP.
 app.get('/api/pncp/propostas', async (req, res) => {
   const {
     dataFinal,
@@ -313,8 +634,7 @@ app.get('/api/pncp/propostas', async (req, res) => {
       });
     }
 
-    const rawRows = toArray(payload);
-    const records = rawRows.map(normalizeContract);
+    const records = toArray(payload).map(normalizeContract);
 
     return res.json({
       source: 'PNCP',
@@ -335,6 +655,8 @@ app.get('/api/pncp/propostas', async (req, res) => {
   } catch (error) {
     const aborted = error?.name === 'AbortError';
 
+    console.error('Erro na consulta ao PNCP:', error);
+
     return res.status(502).json({
       error: aborted
         ? 'A consulta ao PNCP demorou demais e foi interrompida.'
@@ -347,6 +669,27 @@ app.get('/api/pncp/propostas', async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+// Mantém os recursos de automação e parceiros já existentes no projeto.
+const automation = registerAutomation({
+  app,
+  prisma,
+  getDefaultCompany,
+});
+
+const server = app.listen(PORT, () => {
   console.log(`Licita360 API disponível em http://localhost:${PORT}`);
 });
+
+async function shutdown() {
+  automation?.stop?.();
+
+  server.close(async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+
+export default app;

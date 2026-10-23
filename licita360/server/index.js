@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
+import { getCurrentAuthUser, registerAuthRoutes } from './auth.js';
 import { registerAutomation } from './automation.js';
 
 if (!process.env.DATABASE_URL) {
@@ -37,6 +38,13 @@ const LEGACY_FILE = join(
 const DEFAULT_COMPANY_ID = 'licita360-default-company';
 
 app.use(express.json({ limit: '2mb' }));
+// Registra login, cadastro, sessão e recuperação de senha.
+const requireAuth = registerAuthRoutes(app, prisma);
+
+// Protege os dados privados das empresas autenticadas.
+app.use('/api/data', requireAuth);
+app.use('/api/partners', requireAuth);
+app.use('/api/automation', requireAuth);
 
 function toNullableDate(value) {
   if (!value) return null;
@@ -90,7 +98,20 @@ function isValidSnapshot(body) {
   );
 }
 
-async function getDefaultCompany() {
+async function getDefaultCompany(req) {
+  const authenticatedUser = req?.user || getCurrentAuthUser();
+
+  // Usuário autenticado: usa a empresa vinculada à conta.
+  if (authenticatedUser?.companyId) {
+    return prisma.company.findUniqueOrThrow({
+      where: {
+        id: authenticatedUser.companyId,
+      },
+    });
+  }
+
+  // Mantém compatibilidade com tarefas automáticas antigas
+  // que ainda não recebem uma requisição de usuário.
   return prisma.company.upsert({
     where: {
       id: DEFAULT_COMPANY_ID,
@@ -408,9 +429,9 @@ app.get('/api/health', async (_req, res) => {
 });
 
 // Busca os dados salvos no PostgreSQL.
-app.get('/api/data', async (_req, res) => {
+app.get('/api/data', async (req, res) => {
   try {
-    const company = await getDefaultCompany();
+    const company = await getDefaultCompany(req);
     let result = await readCompanySnapshot(company.id);
 
     if (!result.data) {
@@ -442,7 +463,7 @@ app.put('/api/data', async (req, res) => {
   }
 
   try {
-    const company = await getDefaultCompany();
+    const company = await getDefaultCompany(req);
 
     await replaceCompanySnapshot(company.id, req.body);
 
