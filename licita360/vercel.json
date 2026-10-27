@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://licita360.onrender.com"
+      "destination": "https://licita360.onrender.com/api/:path*"
     }
   ]
 }
