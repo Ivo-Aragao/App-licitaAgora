@@ -23,7 +23,9 @@ const adapter = new PrismaPg({
 const prisma = new PrismaClient({ adapter });
 
 const app = express();
-const PORT = Number(process.env.API_PORT || 8787);
+const PORT = Number(
+  process.env.PORT || process.env.API_PORT || 8787
+);
 const PNCP_BASE = 'https://pncp.gov.br/api/consulta';
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
@@ -791,11 +793,9 @@ const automation = registerAutomation({
 });
 
 if (process.env.VERCEL !== '1') {
-  const server = app.listen(PORT, () => {
-    console.log(
-      `Licita360 API disponível em http://localhost:${PORT}`
-    );
-  });
+  const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Licita360 API disponível na porta ${PORT}`);
+});
 
   async function shutdown() {
     automation.stop();
