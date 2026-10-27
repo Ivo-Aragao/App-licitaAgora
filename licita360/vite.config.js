@@ -3,14 +3,11 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-
-  // A pasta public será o destino gerado pelo build.
   publicDir: false,
 
   server: {
     host: '0.0.0.0',
     port: 5173,
-
     proxy: {
       '/api': {
         target: 'http://localhost:8787',
@@ -20,7 +17,7 @@ export default defineConfig({
   },
 
   build: {
-    outDir: 'public',
+    outDir: 'dist',
     emptyOutDir: true,
   },
 });
