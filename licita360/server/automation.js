@@ -14,6 +14,10 @@ const UF_CODES = new Set(
   'AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ')
 );
 
+/* =========================================================
+   FUNÇÕES AUXILIARES
+========================================================= */
+
 function text(value, fallback = '') {
   if (value === undefined || value === null) return fallback;
   return String(value).trim();
@@ -51,10 +55,15 @@ function uniqueNumbers(values, fallback = []) {
 }
 
 function nullableAmount(value) {
-  if (value === '' || value === undefined || value === null) return null;
+  if (value === '' || value === undefined || value === null) {
+    return null;
+  }
 
   const amount = Number(value);
-  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+
+  return Number.isFinite(amount) && amount >= 0
+    ? amount
+    : null;
 }
 
 function parseDate(value) {
@@ -69,6 +78,7 @@ function parseDate(value) {
 
 function dateKey(value) {
   const date = parseDate(value);
+
   return date ? date.toISOString().slice(0, 10) : '';
 }
 
@@ -90,6 +100,7 @@ function dateKeyInZone(value = new Date()) {
 function datePlusDaysKey(days) {
   const today = dateKeyInZone();
   const [year, month, day] = today.split('-').map(Number);
+
   const result = new Date(
     Date.UTC(year, month - 1, day + Number(days || 0))
   );
@@ -101,14 +112,19 @@ function dayDifference(fromKey, toKey) {
   const from = Date.parse(`${fromKey}T00:00:00Z`);
   const to = Date.parse(`${toKey}T00:00:00Z`);
 
-  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+  if (!Number.isFinite(from) || !Number.isFinite(to)) {
+    return null;
+  }
 
   return Math.round((to - from) / 86400000);
 }
 
 function firstDefined(...values) {
   return values.find(
-    (value) => value !== undefined && value !== null && value !== ''
+    (value) =>
+      value !== undefined &&
+      value !== null &&
+      value !== ''
   );
 }
 
@@ -124,7 +140,9 @@ function toArray(payload) {
     'contratacoes',
     'lista',
   ]) {
-    if (Array.isArray(payload?.[key])) return payload[key];
+    if (Array.isArray(payload?.[key])) {
+      return payload[key];
+    }
   }
 
   return [];
@@ -153,11 +171,14 @@ function safeHttpUrl(value) {
   try {
     const url = new URL(String(value || ''));
 
-    if (url.protocol === 'https:' || url.protocol === 'http:') {
+    if (
+      url.protocol === 'https:' ||
+      url.protocol === 'http:'
+    ) {
       return url.toString();
     }
   } catch {
-    // Usa o endereço oficial genérico se a URL for inválida.
+    // Usa a página oficial do PNCP se a URL for inválida.
   }
 
   return 'https://pncp.gov.br/app/editais';
@@ -165,6 +186,7 @@ function safeHttpUrl(value) {
 
 function formatDateBR(value) {
   const date = parseDate(value);
+
   if (!date) return 'Não informado';
 
   return new Intl.DateTimeFormat('pt-BR', {
@@ -173,11 +195,17 @@ function formatDateBR(value) {
   }).format(date);
 }
 
+/* =========================================================
+   CORRESPONDÊNCIA POR RAMOS DE ATIVIDADE
+========================================================= */
+
 function branchTerms(branch) {
   const value = normalizeSearchText(branch);
   const terms = new Set();
 
-  if (value.length >= 3) terms.add(value);
+  if (value.length >= 3) {
+    terms.add(value);
+  }
 
   const synonymGroups = [
     {
@@ -302,8 +330,14 @@ function branchTerms(branch) {
       const normalized = normalizeSearchText(alias);
 
       return value === normalized ||
-        (value.length >= 4 && normalized.includes(value)) ||
-        (normalized.length >= 4 && value.includes(normalized));
+        (
+          value.length >= 4 &&
+          normalized.includes(value)
+        ) ||
+        (
+          normalized.length >= 4 &&
+          value.includes(normalized)
+        );
     });
 
     if (matched) {
@@ -335,9 +369,17 @@ function matchedBranches(record, branches) {
   );
 }
 
+/* =========================================================
+   NORMALIZAÇÃO DOS DADOS DO PNCP
+========================================================= */
+
 function normalizeContract(row) {
   const orgao = row?.orgaoEntidade || row?.orgao || {};
-  const unidade = row?.unidadeOrgao || row?.unidadeAdministrativa || {};
+
+  const unidade =
+    row?.unidadeOrgao ||
+    row?.unidadeAdministrativa ||
+    {};
 
   const title = String(firstDefined(
     row?.objetoCompra,
@@ -390,7 +432,9 @@ function normalizeContract(row) {
     null
   );
 
-  const amount = rawAmount === null ? null : Number(rawAmount);
+  const amount = rawAmount === null
+    ? null
+    : Number(rawAmount);
 
   const rawDeadline = firstDefined(
     row?.dataEncerramentoProposta,
@@ -410,35 +454,62 @@ function normalizeContract(row) {
     pncpId: String(pncpId),
     title,
     agency,
+
     unit: String(firstDefined(
       unidade?.nomeUnidade,
       unidade?.nomeUnidadeAdministrativa,
       ''
     )),
+
     city,
     uf,
+
     location: city
       ? [city, uf].filter(Boolean).join('/')
-      : (uf ? `Município não informado/${uf}` : 'Município não informado'),
+      : (
+          uf
+            ? `Município não informado/${uf}`
+            : 'Município não informado'
+        ),
+
     modality: String(firstDefined(
       row?.modalidadeNome,
       row?.modalidade,
       'Modalidade não informada'
     )),
-    amount: amount !== null && Number.isFinite(amount) && amount >= 0
-      ? amount
-      : null,
+
+    amount:
+      amount !== null &&
+      Number.isFinite(amount) &&
+      amount >= 0
+        ? amount
+        : null,
+
     deadline: parseDate(rawDeadline),
     url: safeHttpUrl(url),
     raw: row,
   };
 }
 
-async function fetchPncpRecords({ uf, modality, daysAhead }) {
-  const dataFinal = datePlusDaysKey(daysAhead).replace(/-/g, '');
+/* =========================================================
+   CONSULTA À API DO PNCP
+========================================================= */
+
+async function fetchPncpRecords({
+  uf,
+  modality,
+  daysAhead,
+}) {
+  const dataFinal = datePlusDaysKey(daysAhead)
+    .replace(/-/g, '');
+
   const records = [];
 
-  for (let page = 1; page <= MAX_PAGES; page += 1) {
+  for (
+    let page = 1;
+    page <= MAX_PAGES;
+    page += 1
+  ) {
     const params = new URLSearchParams({
       dataFinal,
       pagina: String(page),
@@ -446,10 +517,16 @@ async function fetchPncpRecords({ uf, modality, daysAhead }) {
       codigoModalidadeContratacao: String(modality),
     });
 
-    if (uf) params.set('uf', uf);
+    if (uf) {
+      params.set('uf', uf);
+    }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 18000);
+
+    const timeout = setTimeout(
+      () => controller.abort(),
+      18000
+    );
 
     let response;
 
@@ -457,7 +534,9 @@ async function fetchPncpRecords({ uf, modality, daysAhead }) {
       response = await fetch(
         `${PNCP_BASE}/v1/contratacoes/proposta?${params.toString()}`,
         {
-          headers: { accept: 'application/json' },
+          headers: {
+            accept: 'application/json',
+          },
           signal: controller.signal,
         }
       );
@@ -466,12 +545,17 @@ async function fetchPncpRecords({ uf, modality, daysAhead }) {
     }
 
     const bodyText = await response.text();
+
     let payload = {};
 
     try {
-      payload = bodyText ? JSON.parse(bodyText) : {};
+      payload = bodyText
+        ? JSON.parse(bodyText)
+        : {};
     } catch {
-      throw new Error('O PNCP respondeu com conteúdo inválido.');
+      throw new Error(
+        'O PNCP respondeu com conteúdo inválido.'
+      );
     }
 
     if (!response.ok) {
@@ -481,15 +565,28 @@ async function fetchPncpRecords({ uf, modality, daysAhead }) {
     }
 
     const pageRows = toArray(payload);
-    records.push(...pageRows.map(normalizeContract));
 
-    if (pageRows.length < PAGE_SIZE) break;
+    records.push(
+      ...pageRows.map(normalizeContract)
+    );
+
+    if (pageRows.length < PAGE_SIZE) {
+      break;
+    }
   }
 
   return records;
 }
 
-async function sendEmail({ to, subject, html }) {
+/* =========================================================
+   ENVIO DE E-MAIL
+========================================================= */
+
+async function sendEmail({
+  to,
+  subject,
+  html,
+}) {
   const user = process.env.GOOGLE_EMAIL;
   const password = process.env.GOOGLE_APP_PASSWORD;
 
@@ -500,7 +597,9 @@ async function sendEmail({ to, subject, html }) {
   }
 
   if (!to) {
-    throw new Error('Informe um e-mail destinatário.');
+    throw new Error(
+      'Informe um e-mail destinatário.'
+    );
   }
 
   const transporter = nodemailer.createTransport({
@@ -514,7 +613,9 @@ async function sendEmail({ to, subject, html }) {
   });
 
   const info = await transporter.sendMail({
-    from: process.env.ALERT_FROM_EMAIL || `Licita360 <${user}>`,
+    from:
+      process.env.ALERT_FROM_EMAIL ||
+      `Licita360 <${user}>`,
     to,
     subject,
     html,
@@ -540,7 +641,8 @@ async function sendTrackedEmail(
   if (!to) {
     return {
       sent: false,
-      error: 'Cadastre um e-mail destinatário nas configurações.',
+      error:
+        'Cadastre um e-mail destinatário nas configurações.',
     };
   }
 
@@ -551,14 +653,21 @@ async function sendTrackedEmail(
     },
   };
 
-  const existing = await prisma.notificationLog.findUnique({ where });
+  const existing =
+    await prisma.notificationLog.findUnique({
+      where,
+    });
 
   if (existing?.status === 'sent') {
-    return { sent: true, alreadySent: true };
+    return {
+      sent: true,
+      alreadySent: true,
+    };
   }
 
   await prisma.notificationLog.upsert({
     where,
+
     create: {
       companyId,
       type,
@@ -568,6 +677,7 @@ async function sendTrackedEmail(
       status: 'pending',
       metadata,
     },
+
     update: {
       type,
       recipientEmail: to,
@@ -579,7 +689,11 @@ async function sendTrackedEmail(
   });
 
   try {
-    await sendEmail({ to, subject, html });
+    await sendEmail({
+      to,
+      subject,
+      html,
+    });
 
     await prisma.notificationLog.update({
       where,
@@ -590,81 +704,144 @@ async function sendTrackedEmail(
       },
     });
 
-    return { sent: true };
+    return {
+      sent: true,
+    };
   } catch (error) {
     await prisma.notificationLog.update({
       where,
       data: {
         status: 'failed',
-        error: text(error?.message, 'Erro desconhecido').slice(0, 1000),
+        error: text(
+          error?.message,
+          'Erro desconhecido'
+        ).slice(0, 1000),
       },
     });
 
-    console.error(`Falha no e-mail ${type}:`, error);
+    console.error(
+      `Falha no e-mail ${type}:`,
+      error
+    );
 
     return {
       sent: false,
-      error: text(error?.message, 'Falha ao enviar e-mail'),
+      error: text(
+        error?.message,
+        'Falha ao enviar e-mail'
+      ),
     };
   }
 }
+
+/* =========================================================
+   CONFIGURAÇÕES PADRÃO
+========================================================= */
 
 async function ensureSettings(prisma, company) {
   return prisma.prospectingSettings.upsert({
     where: {
       companyId: company.id,
     },
+
     create: {
       companyId: company.id,
-      recipientEmail: text(process.env.ALERT_DEFAULT_EMAIL) || null,
+
+      recipientEmail:
+        text(process.env.ALERT_DEFAULT_EMAIL) ||
+        null,
+
       enabled: false,
       dailyEmailEnabled: true,
       documentAlertsEnabled: true,
       partnerAlertsEnabled: true,
+
       ufs: DEFAULT_UFS,
       modalities: DEFAULT_MODALITIES,
       daysAhead: 30,
+
       documentAlertDays: DEFAULT_DOCUMENT_DAYS,
     },
+
     update: {},
   });
 }
 
-function amountWithinLimits(amount, minimum, maximum) {
-  if (minimum !== null && minimum !== undefined) {
-    if (amount === null || amount < Number(minimum)) return false;
+function amountWithinLimits(
+  amount,
+  minimum,
+  maximum
+) {
+  if (
+    minimum !== null &&
+    minimum !== undefined
+  ) {
+    if (
+      amount === null ||
+      amount === undefined ||
+      Number(amount) < Number(minimum)
+    ) {
+      return false;
+    }
   }
 
-  if (maximum !== null && maximum !== undefined) {
-    if (amount === null || amount > Number(maximum)) return false;
+  if (
+    maximum !== null &&
+    maximum !== undefined
+  ) {
+    if (
+      amount === null ||
+      amount === undefined ||
+      Number(amount) > Number(maximum)
+    ) {
+      return false;
+    }
   }
 
   return true;
 }
 
-function matchesUserFilters(record, settings, branches) {
+function matchesUserFilters(
+  record,
+  settings,
+  branches
+) {
   const ufs = settings.ufs || [];
-const modalities = settings.modalities || [];
+  const modalities = settings.modalities || [];
 
-if (ufs.length && !ufs.includes(record.uf)) {
-  return false;
-}
-
-const code = String(record.modalityCode || '');
-
-if (modalities.length && code && !modalities.includes(code)) {
-  return false;
-}
-
-  if (!amountWithinLimits(
-    record.amount,
-    settings.minAmount,
-    settings.maxAmount
-  )) {
+  if (
+    ufs.length &&
+    !ufs.includes(record.uf)
+  ) {
     return false;
   }
 
-  if (branches.length && matchedBranches(record, branches).length === 0) {
+  const code = String(
+    record.modalityCode || ''
+  );
+
+  if (
+    modalities.length &&
+    code &&
+    !modalities.includes(code)
+  ) {
+    return false;
+  }
+
+  if (
+    !amountWithinLimits(
+      record.amount,
+      settings.minAmount,
+      settings.maxAmount
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    branches.length &&
+    matchedBranches(record, branches).length === 0
+  ) {
     return false;
   }
 
@@ -672,38 +849,59 @@ if (modalities.length && code && !modalities.includes(code)) {
 }
 
 function modalityCodeForRecord(record) {
-  const value = record?.raw?.codigoModalidadeContratacao;
+  const value =
+    record?.raw?.codigoModalidadeContratacao;
 
   return value === null || value === undefined
     ? ''
     : String(value);
 }
 
-async function prospectCompany(prisma, company, settings) {
-  const partners = await prisma.partnerCompany.findMany({
-    where: {
-      ownerCompanyId: company.id,
-      active: true,
-    },
-    include: {
-      branches: true,
-    },
-  });
+/* =========================================================
+   PROSPECÇÃO DE OPORTUNIDADES
+========================================================= */
 
-  const configuredUfs = uniqueStrings(settings.ufs, { upper: true })
-    .filter((uf) => UF_CODES.has(uf));
+async function prospectCompany(
+  prisma,
+  company,
+  settings
+) {
+  const partners =
+    await prisma.partnerCompany.findMany({
+      where: {
+        ownerCompanyId: company.id,
+        active: true,
+      },
+      include: {
+        branches: true,
+      },
+    });
+
+  const configuredUfs = uniqueStrings(
+    settings.ufs,
+    { upper: true }
+  ).filter((uf) => UF_CODES.has(uf));
 
   const partnerUfs = partners
-    .map((partner) => text(partner.uf).toUpperCase())
+    .map((partner) =>
+      text(partner.uf).toUpperCase()
+    )
     .filter((uf) => UF_CODES.has(uf));
 
   const ufs = [...new Set([
-    ...(configuredUfs.length ? configuredUfs : [company.uf || 'CE']),
+    ...(
+      configuredUfs.length
+        ? configuredUfs
+        : [company.uf || 'CE']
+    ),
     ...partnerUfs,
   ])];
 
-  const modalities = uniqueStrings(settings.modalities)
-    .filter((modality) => /^\d+$/.test(modality));
+  const modalities = uniqueStrings(
+    settings.modalities
+  ).filter((modality) =>
+    /^\d+$/.test(modality)
+  );
 
   const activeModalities = modalities.length
     ? modalities
@@ -726,26 +924,34 @@ async function prospectCompany(prisma, company, settings) {
         });
       } catch (error) {
         failures += 1;
+
         console.error(
           `Falha ao consultar PNCP para UF ${uf} e modalidade ${modality}:`,
           error
         );
+
         continue;
       }
 
       for (const record of records) {
-        if (record.deadline && dateKey(record.deadline) < today) {
+        if (
+          record.deadline &&
+          dateKey(record.deadline) < today
+        ) {
           continue;
         }
 
-        const existing = await prisma.discoveredOpportunity.findUnique({
-          where: {
-            companyId_pncpId: {
-              companyId: company.id,
-              pncpId: record.pncpId,
-            },
+        const uniqueWhere = {
+          companyId_pncpId: {
+            companyId: company.id,
+            pncpId: record.pncpId,
           },
-        });
+        };
+
+        const existing =
+          await prisma.discoveredOpportunity.findUnique({
+            where: uniqueWhere,
+          });
 
         const data = {
           title: record.title,
@@ -762,32 +968,32 @@ async function prospectCompany(prisma, company, settings) {
         };
 
         await prisma.discoveredOpportunity.upsert({
-          where: {
-            companyId_pncpId: {
-              companyId: company.id,
-              pncpId: record.pncpId,
-            },
-          },
+          where: uniqueWhere,
+
           create: {
             companyId: company.id,
             pncpId: record.pncpId,
             ...data,
             firstSeenAt: new Date(),
           },
+
           update: data,
         });
 
-        if (!existing) newDiscoveries += 1;
+        if (!existing) {
+          newDiscoveries += 1;
+        }
       }
     }
   }
 
-  const partnerMatches = await matchPartnerOpportunities(
-    prisma,
-    company,
-    settings,
-    partners
-  );
+  const partnerMatches =
+    await matchPartnerOpportunities(
+      prisma,
+      company,
+      settings,
+      partners
+    );
 
   return {
     newDiscoveries,
@@ -796,26 +1002,44 @@ async function prospectCompany(prisma, company, settings) {
   };
 }
 
-function partnerFitsOpportunity(partner, opportunity) {
+/* =========================================================
+   CORRESPONDÊNCIA COM EMPRESAS PARCEIRAS
+========================================================= */
+
+function partnerFitsOpportunity(
+  partner,
+  opportunity
+) {
   if (
     partner.uf &&
     opportunity.uf &&
-    partner.uf.toUpperCase() !== opportunity.uf.toUpperCase()
+    partner.uf.toUpperCase() !==
+      opportunity.uf.toUpperCase()
   ) {
     return false;
   }
 
   if (partner.cities?.length) {
-    if (!opportunity.city) return false;
+    if (!opportunity.city) {
+      return false;
+    }
 
-    const partnerCities = partner.cities.map(normalizeSearchText);
-    if (!partnerCities.includes(normalizeSearchText(opportunity.city))) {
+    const partnerCities =
+      partner.cities.map(normalizeSearchText);
+
+    if (
+      !partnerCities.includes(
+        normalizeSearchText(opportunity.city)
+      )
+    ) {
       return false;
     }
   }
 
   return amountWithinLimits(
-    opportunity.amount === null ? null : Number(opportunity.amount),
+    opportunity.amount === null
+      ? null
+      : Number(opportunity.amount),
     partner.minimumAmount,
     partner.maximumAmount
   );
@@ -827,39 +1051,68 @@ async function matchPartnerOpportunities(
   settings,
   partners
 ) {
-  const since = new Date(Date.now() - 45 * 86400000);
+  const since = new Date(
+    Date.now() - 45 * 86400000
+  );
+
   const today = dateKeyInZone();
 
-  const discoveries = await prisma.discoveredOpportunity.findMany({
-    where: {
-      companyId: company.id,
-      firstSeenAt: { gte: since },
-    },
-    orderBy: { firstSeenAt: 'desc' },
-    take: 500,
-  });
+  const discoveries =
+    await prisma.discoveredOpportunity.findMany({
+      where: {
+        companyId: company.id,
+        firstSeenAt: {
+          gte: since,
+        },
+      },
+
+      orderBy: {
+        firstSeenAt: 'desc',
+      },
+
+      take: 500,
+    });
 
   let newMatches = 0;
 
   for (const partner of partners) {
-    if (!partner.notifyOpportunities || !partner.branches.length) {
+    if (
+      !partner.notifyOpportunities ||
+      !partner.branches.length
+    ) {
       continue;
     }
 
-    const branches = partner.branches.map((branch) => branch.name);
+    const branches =
+      partner.branches.map(
+        (branch) => branch.name
+      );
 
     for (const opportunity of discoveries) {
-      if (opportunity.deadline && dateKey(opportunity.deadline) < today) {
+      if (
+        opportunity.deadline &&
+        dateKey(opportunity.deadline) < today
+      ) {
         continue;
       }
 
-      if (!partnerFitsOpportunity(partner, opportunity)) {
+      if (
+        !partnerFitsOpportunity(
+          partner,
+          opportunity
+        )
+      ) {
         continue;
       }
 
-      const matched = matchedBranches(opportunity, branches);
+      const matched = matchedBranches(
+        opportunity,
+        branches
+      );
 
-      if (!matched.length) continue;
+      if (!matched.length) {
+        continue;
+      }
 
       const uniqueWhere = {
         partnerId_discoveryId: {
@@ -868,30 +1121,36 @@ async function matchPartnerOpportunities(
         },
       };
 
-      let match = await prisma.partnerOpportunityMatch.findUnique({
-        where: uniqueWhere,
-      });
+      let match =
+        await prisma.partnerOpportunityMatch.findUnique({
+          where: uniqueWhere,
+        });
 
       if (!match) {
         try {
-          match = await prisma.partnerOpportunityMatch.create({
-            data: {
-              companyId: company.id,
-              partnerId: partner.id,
-              discoveryId: opportunity.id,
-              matchedBranches: matched,
-              reason: `Correspondência por ramo: ${matched.join(', ')}`,
-            },
-          });
+          match =
+            await prisma.partnerOpportunityMatch.create({
+              data: {
+                companyId: company.id,
+                partnerId: partner.id,
+                discoveryId: opportunity.id,
+                matchedBranches: matched,
+                reason:
+                  `Correspondência por ramo: ${matched.join(', ')}`,
+              },
+            });
 
           newMatches += 1;
         } catch (error) {
-          // Protege contra criação simultânea do mesmo vínculo.
-          if (error?.code !== 'P2002') throw error;
+          // Evita duplicação em caso de execução simultânea.
+          if (error?.code !== 'P2002') {
+            throw error;
+          }
 
-          match = await prisma.partnerOpportunityMatch.findUnique({
-            where: uniqueWhere,
-          });
+          match =
+            await prisma.partnerOpportunityMatch.findUnique({
+              where: uniqueWhere,
+            });
         }
       }
 
@@ -906,62 +1165,115 @@ async function matchPartnerOpportunities(
 
       const url = safeHttpUrl(opportunity.url);
 
-      const subject = `Licita360: oportunidade para ${partner.name}`;
+      const subject =
+        `Licita360: oportunidade para ${partner.name}`;
+
+      const cityAndUf = opportunity.city
+        ? [
+            opportunity.city,
+            opportunity.uf,
+          ].filter(Boolean).join('/')
+        : (
+            opportunity.uf ||
+            'Não informado'
+          );
+
+      const formattedAmount =
+        opportunity.amount === null
+          ? 'Não informado'
+          : new Intl.NumberFormat('pt-BR', {
+              style: 'currency',
+              currency: 'BRL',
+            }).format(
+              Number(opportunity.amount)
+            );
 
       const html = `
         <div style="font-family:Arial,sans-serif;line-height:1.5;color:#182230">
           <h2>Possível oportunidade para uma empresa parceira</h2>
+
           <p>
             A prospecção do Licita360 encontrou uma contratação que pode
             corresponder aos segmentos cadastrados para
             <strong>${escapeHtml(partner.name)}</strong>.
           </p>
+
           <hr>
+
           <h3>${escapeHtml(opportunity.title)}</h3>
-          <p><strong>Órgão:</strong> ${escapeHtml(opportunity.agency)}</p>
-          <p><strong>Município:</strong> ${escapeHtml(
-            opportunity.city
-              ? [opportunity.city, opportunity.uf].filter(Boolean).join('/')
-              : (opportunity.uf || 'Não informado')
-          )}</p>
-          <p><strong>Modalidade:</strong> ${escapeHtml(opportunity.modality)}</p>
-          <p><strong>Valor estimado:</strong> ${opportunity.amount === null
-            ? 'Não informado'
-            : escapeHtml(new Intl.NumberFormat('pt-BR', {
-                style: 'currency',
-                currency: 'BRL',
-              }).format(Number(opportunity.amount)))}</p>
-          <p><strong>Prazo:</strong> ${escapeHtml(formatDateBR(opportunity.deadline))}</p>
-          <p><strong>Ramos correspondentes:</strong> ${escapeHtml(matched.join(', '))}</p>
+
           <p>
-            <a href="${escapeHtml(url)}">Consultar a fonte da contratação</a>
+            <strong>Órgão:</strong>
+            ${escapeHtml(opportunity.agency)}
           </p>
+
+          <p>
+            <strong>Município:</strong>
+            ${escapeHtml(cityAndUf)}
+          </p>
+
+          <p>
+            <strong>Modalidade:</strong>
+            ${escapeHtml(opportunity.modality)}
+          </p>
+
+          <p>
+            <strong>Valor estimado:</strong>
+            ${escapeHtml(formattedAmount)}
+          </p>
+
+          <p>
+            <strong>Prazo:</strong>
+            ${escapeHtml(formatDateBR(opportunity.deadline))}
+          </p>
+
+          <p>
+            <strong>Ramos correspondentes:</strong>
+            ${escapeHtml(matched.join(', '))}
+          </p>
+
+          <p>
+            <a href="${escapeHtml(url)}">
+              Consultar a fonte da contratação
+            </a>
+          </p>
+
           <p style="font-size:12px;color:#667085">
-            Correspondência automática indicativa. Confira o edital, a área de
-            execução, as exigências de habilitação e o interesse da empresa.
+            Correspondência automática indicativa. Confira o edital,
+            a área de execução, as exigências de habilitação e o
+            interesse da empresa.
           </p>
         </div>
       `;
 
-      const result = await sendTrackedEmail(prisma, {
-        companyId: company.id,
-        type: 'partner_opportunity',
-        dedupeKey: `partner-match:${match.id}`,
-        to: settings.recipientEmail,
-        subject,
-        html,
-        metadata: {
-          matchId: match.id,
-          partnerId: partner.id,
-          discoveryId: opportunity.id,
-          matchedBranches: matched,
-        },
-      });
+      const result = await sendTrackedEmail(
+        prisma,
+        {
+          companyId: company.id,
+          type: 'partner_opportunity',
+          dedupeKey: `partner-match:${match.id}`,
+          to: settings.recipientEmail,
+          subject,
+          html,
+
+          metadata: {
+            matchId: match.id,
+            partnerId: partner.id,
+            discoveryId: opportunity.id,
+            matchedBranches: matched,
+          },
+        }
+      );
 
       if (result.sent) {
         await prisma.partnerOpportunityMatch.update({
-          where: { id: match.id },
-          data: { notifiedAt: new Date() },
+          where: {
+            id: match.id,
+          },
+
+          data: {
+            notifiedAt: new Date(),
+          },
         });
       }
     }
@@ -970,31 +1282,56 @@ async function matchPartnerOpportunities(
   return newMatches;
 }
 
-async function checkDocumentAlerts(prisma, company, settings) {
-  if (!settings.documentAlertsEnabled || !settings.recipientEmail) {
+/* =========================================================
+   ALERTAS DE VENCIMENTO DE DOCUMENTOS
+========================================================= */
+
+async function checkDocumentAlerts(
+  prisma,
+  company,
+  settings
+) {
+  if (
+    !settings.documentAlertsEnabled ||
+    !settings.recipientEmail
+  ) {
     return 0;
   }
 
-  const documents = await prisma.document.findMany({
-    where: {
-      companyId: company.id,
-      expires: { not: null },
-    },
-  });
+  const documents =
+    await prisma.document.findMany({
+      where: {
+        companyId: company.id,
+        expires: {
+          not: null,
+        },
+      },
+    });
 
   const today = dateKeyInZone();
-  const configuredDays = settings.documentAlertDays?.length
-    ? settings.documentAlertDays
-    : DEFAULT_DOCUMENT_DAYS;
+
+  const configuredDays =
+    settings.documentAlertDays?.length
+      ? settings.documentAlertDays
+      : DEFAULT_DOCUMENT_DAYS;
 
   let attempted = 0;
 
   for (const document of documents) {
     const expiryKey = dateKey(document.expires);
-    if (!expiryKey) continue;
 
-    const daysLeft = dayDifference(today, expiryKey);
-    if (daysLeft === null) continue;
+    if (!expiryKey) {
+      continue;
+    }
+
+    const daysLeft = dayDifference(
+      today,
+      expiryKey
+    );
+
+    if (daysLeft === null) {
+      continue;
+    }
 
     let thresholdKey;
     let subject;
@@ -1002,10 +1339,15 @@ async function checkDocumentAlerts(prisma, company, settings) {
 
     if (daysLeft < 0) {
       thresholdKey = 'expired';
-      subject = `Licita360: documento vencido — ${document.name}`;
-      message = `O documento venceu em ${formatDateBR(document.expires)}.`;
+
+      subject =
+        `Licita360: documento vencido — ${document.name}`;
+
+      message =
+        `O documento venceu em ${formatDateBR(document.expires)}.`;
     } else if (configuredDays.includes(daysLeft)) {
       thresholdKey = `days-${daysLeft}`;
+
       subject = daysLeft === 0
         ? `Licita360: documento vence hoje — ${document.name}`
         : `Licita360: documento vence em ${daysLeft} dia(s) — ${document.name}`;
@@ -1020,62 +1362,114 @@ async function checkDocumentAlerts(prisma, company, settings) {
     const html = `
       <div style="font-family:Arial,sans-serif;line-height:1.5;color:#182230">
         <h2>Alerta de validade documental</h2>
-        <p><strong>Documento:</strong> ${escapeHtml(document.name)}</p>
-        <p><strong>Categoria:</strong> ${escapeHtml(document.type)}</p>
-        <p><strong>Validade:</strong> ${escapeHtml(formatDateBR(document.expires))}</p>
+
+        <p>
+          <strong>Documento:</strong>
+          ${escapeHtml(document.name)}
+        </p>
+
+        <p>
+          <strong>Categoria:</strong>
+          ${escapeHtml(document.type)}
+        </p>
+
+        <p>
+          <strong>Validade:</strong>
+          ${escapeHtml(formatDateBR(document.expires))}
+        </p>
+
         <p>${escapeHtml(message)}</p>
-        <p>Confira o documento e providencie a renovação quando necessário.</p>
+
+        <p>
+          Confira o documento e providencie a renovação quando necessário.
+        </p>
+
         <p style="font-size:12px;color:#667085">
-          O alerta utiliza a data cadastrada no Licita360. Confirme a validade
-          no documento original antes de tomar decisões.
+          O alerta utiliza a data cadastrada no Licita360. Confirme
+          a validade no documento original antes de tomar decisões.
         </p>
       </div>
     `;
 
-    const result = await sendTrackedEmail(prisma, {
-      companyId: company.id,
-      type: 'document_expiration',
-      dedupeKey: `document:${document.id}:${thresholdKey}:${expiryKey}`,
-      to: settings.recipientEmail,
-      subject,
-      html,
-      metadata: {
-        documentId: document.id,
-        expiryKey,
-        daysLeft,
-      },
-    });
+    const result = await sendTrackedEmail(
+      prisma,
+      {
+        companyId: company.id,
+        type: 'document_expiration',
 
-    if (result.sent) attempted += 1;
+        dedupeKey:
+          `document:${document.id}:${thresholdKey}:${expiryKey}`,
+
+        to: settings.recipientEmail,
+        subject,
+        html,
+
+        metadata: {
+          documentId: document.id,
+          expiryKey,
+          daysLeft,
+        },
+      }
+    );
+
+    if (result.sent) {
+      attempted += 1;
+    }
   }
 
   return attempted;
 }
 
-async function sendDailyDigest(prisma, company, settings) {
+/* =========================================================
+   RESUMO DIÁRIO POR E-MAIL
+========================================================= */
+
+async function sendDailyDigest(
+  prisma,
+  company,
+  settings
+) {
   if (
-    !settings.enabled ||
     !settings.dailyEmailEnabled ||
     !settings.recipientEmail
   ) {
-    return { sent: false, reason: 'Resumo diário desativado ou sem destinatário.' };
+    return {
+      sent: false,
+      reason:
+        'Resumo diário desativado ou sem destinatário.',
+    };
   }
 
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const discoveries = await prisma.discoveredOpportunity.findMany({
-    where: {
-      companyId: company.id,
-      firstSeenAt: { gte: since },
-    },
-    orderBy: { firstSeenAt: 'desc' },
-    take: 500,
-  });
+  const since = new Date(
+    Date.now() - 24 * 60 * 60 * 1000
+  );
 
-  const branchesRows = await prisma.companyBranch.findMany({
-    where: { companyId: company.id },
-  });
+  const discoveries =
+    await prisma.discoveredOpportunity.findMany({
+      where: {
+        companyId: company.id,
+        firstSeenAt: {
+          gte: since,
+        },
+      },
 
-  const branches = branchesRows.map((branch) => branch.name);
+      orderBy: {
+        firstSeenAt: 'desc',
+      },
+
+      take: 500,
+    });
+
+  const branchesRows =
+    await prisma.companyBranch.findMany({
+      where: {
+        companyId: company.id,
+      },
+    });
+
+  const branches = branchesRows.map(
+    (branch) => branch.name
+  );
 
   const relevant = discoveries.filter((item) => {
     const record = {
@@ -1083,28 +1477,57 @@ async function sendDailyDigest(prisma, company, settings) {
       modalityCode: modalityCodeForRecord(item),
     };
 
-    return matchesUserFilters(record, settings, branches);
+    return matchesUserFilters(
+      record,
+      settings,
+      branches
+    );
   });
 
   const listHtml = relevant.length
     ? relevant.slice(0, 40).map((item) => {
         const url = safeHttpUrl(item.url);
 
+        const location = item.city
+          ? [
+              item.city,
+              item.uf,
+            ].filter(Boolean).join('/')
+          : (
+              item.uf ||
+              'Não informado'
+            );
+
+        const amount =
+          item.amount === null ||
+          item.amount === undefined
+            ? 'Não informado'
+            : new Intl.NumberFormat('pt-BR', {
+                style: 'currency',
+                currency: 'BRL',
+              }).format(
+                Number(item.amount)
+              );
+
         return `
           <li style="margin-bottom:16px">
             <strong>${escapeHtml(item.title)}</strong><br>
-            Órgão: ${escapeHtml(item.agency)}<br>
-            Local: ${escapeHtml(item.city
-              ? [item.city, item.uf].filter(Boolean).join('/')
-              : (item.uf || 'Não informado'))}<br>
-            Valor: ${item.amount === null
-              ? 'Não informado'
-              : escapeHtml(new Intl.NumberFormat('pt-BR', {
-                  style: 'currency',
-                  currency: 'BRL',
-                }).format(Number(item.amount)))}<br>
-            Prazo: ${escapeHtml(formatDateBR(item.deadline))}<br>
-            <a href="${escapeHtml(url)}">Abrir fonte oficial</a>
+
+            Órgão:
+            ${escapeHtml(item.agency)}<br>
+
+            Local:
+            ${escapeHtml(location)}<br>
+
+            Valor:
+            ${escapeHtml(amount)}<br>
+
+            Prazo:
+            ${escapeHtml(formatDateBR(item.deadline))}<br>
+
+            <a href="${escapeHtml(url)}">
+              Abrir fonte oficial
+            </a>
           </li>
         `;
       }).join('')
@@ -1113,33 +1536,61 @@ async function sendDailyDigest(prisma, company, settings) {
   const html = `
     <div style="font-family:Arial,sans-serif;line-height:1.5;color:#182230">
       <h2>Resumo diário do Licita360</h2>
-      <p>Olá! Estas são as oportunidades identificadas nas últimas 24 horas para
-      ${escapeHtml(company.name)}.</p>
-      <p><strong>Oportunidades correspondentes:</strong> ${relevant.length}</p>
+
+      <p>
+        Olá! Estas são as oportunidades identificadas nas últimas
+        24 horas para ${escapeHtml(company.name)}.
+      </p>
+
+      <p>
+        <strong>Oportunidades correspondentes:</strong>
+        ${relevant.length}
+      </p>
+
       <ul>${listHtml}</ul>
-      ${relevant.length > 40
-        ? '<p>O e-mail mostra as primeiras 40 oportunidades. Consulte o Radar para ver os demais resultados.</p>'
-        : ''}
+
+      ${
+        relevant.length > 40
+          ? '<p>O e-mail mostra as primeiras 40 oportunidades. Consulte o Radar para ver os demais resultados.</p>'
+          : ''
+      }
+
       <p style="font-size:12px;color:#667085">
-        Os resultados são indicações automáticas. Confira os editais, os
-        prazos e as exigências na fonte oficial antes de decidir participar.
+        Os resultados são indicações automáticas. Confira os editais,
+        os prazos e as exigências na fonte oficial antes de decidir participar.
       </p>
     </div>
   `;
 
-  return sendTrackedEmail(prisma, {
-    companyId: company.id,
-    type: 'daily_digest',
-    dedupeKey: `daily-digest:${dateKeyInZone()}`,
-    to: settings.recipientEmail,
-    subject: `Licita360 — resumo diário de oportunidades (${relevant.length})`,
-    html,
-    metadata: {
-      count: relevant.length,
-      discoveryIds: relevant.map((item) => item.id),
-    },
-  });
+  return sendTrackedEmail(
+    prisma,
+    {
+      companyId: company.id,
+      type: 'daily_digest',
+
+      dedupeKey:
+        `daily-digest:${dateKeyInZone()}`,
+
+      to: settings.recipientEmail,
+
+      subject:
+        `Licita360 — resumo diário de oportunidades (${relevant.length})`,
+
+      html,
+
+      metadata: {
+        count: relevant.length,
+        discoveryIds: relevant.map(
+          (item) => item.id
+        ),
+      },
+    }
+  );
 }
+
+/* =========================================================
+   PROCESSAMENTO DA AUTOMAÇÃO POR EMPRESA
+========================================================= */
 
 async function processCompany(
   prisma,
@@ -1149,7 +1600,10 @@ async function processCompany(
     dailyDigest = false,
   } = {}
 ) {
-  const settings = await ensureSettings(prisma, company);
+  const settings = await ensureSettings(
+    prisma,
+    company
+  );
 
   const result = {
     companyId: company.id,
@@ -1161,30 +1615,41 @@ async function processCompany(
   };
 
   try {
-    result.documentAlerts = await checkDocumentAlerts(
-      prisma,
-      company,
-      settings
-    );
-
-    if (settings.enabled || forceProspecting) {
-      const prospecting = await prospectCompany(
+    result.documentAlerts =
+      await checkDocumentAlerts(
         prisma,
         company,
         settings
       );
 
-      result.newDiscoveries = prospecting.newDiscoveries;
-      result.partnerMatches = prospecting.partnerMatches;
-      result.queryFailures = prospecting.queryFailures;
+    if (
+      settings.enabled ||
+      forceProspecting
+    ) {
+      const prospecting =
+        await prospectCompany(
+          prisma,
+          company,
+          settings
+        );
+
+      result.newDiscoveries =
+        prospecting.newDiscoveries;
+
+      result.partnerMatches =
+        prospecting.partnerMatches;
+
+      result.queryFailures =
+        prospecting.queryFailures;
     }
 
     if (dailyDigest) {
-      result.dailyEmail = await sendDailyDigest(
-        prisma,
-        company,
-        settings
-      );
+      result.dailyEmail =
+        await sendDailyDigest(
+          prisma,
+          company,
+          settings
+        );
     }
   } catch (error) {
     console.error(
@@ -1192,57 +1657,89 @@ async function processCompany(
       error
     );
 
-    result.error = text(error?.message, 'Erro desconhecido');
+    result.error = text(
+      error?.message,
+      'Erro desconhecido'
+    );
   }
 
   return result;
 }
 
-function stringsFromBody(value, fallback = []) {
+/* =========================================================
+   VALIDAÇÃO DE EMPRESAS PARCEIRAS
+========================================================= */
+
+function stringsFromBody(
+  value,
+  fallback = []
+) {
   const result = uniqueStrings(value);
 
-  return result.length ? result : fallback;
+  return result.length
+    ? result
+    : fallback;
 }
 
 function normalizePartnerBody(body) {
   const name = text(body?.name);
 
   if (!name) {
-    throw new Error('Informe o nome da empresa parceira.');
+    throw new Error(
+      'Informe o nome da empresa parceira.'
+    );
   }
 
   const branches = uniqueStrings(
-    (Array.isArray(body.branches) ? body.branches : [])
-      .map((branch) => (
-        typeof branch === 'object'
-          ? branch?.name
-          : branch
-      ))
+    (
+      Array.isArray(body.branches)
+        ? body.branches
+        : []
+    ).map((branch) =>
+      typeof branch === 'object'
+        ? branch?.name
+        : branch
+    )
   );
 
   const cities = uniqueStrings(body.cities);
 
   const email = text(body.email) || null;
 
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error('O e-mail da empresa parceira parece inválido.');
+  if (
+    email &&
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  ) {
+    throw new Error(
+      'O e-mail da empresa parceira parece inválido.'
+    );
   }
 
-  const uf = text(body.uf, 'CE').toUpperCase();
+  const uf = text(
+    body.uf,
+    'CE'
+  ).toUpperCase();
 
   if (!UF_CODES.has(uf)) {
-    throw new Error('Selecione uma UF válida para a empresa parceira.');
+    throw new Error(
+      'Selecione uma UF válida para a empresa parceira.'
+    );
   }
 
-  const minimumAmount = nullableAmount(body.minimumAmount);
-  const maximumAmount = nullableAmount(body.maximumAmount);
+  const minimumAmount =
+    nullableAmount(body.minimumAmount);
+
+  const maximumAmount =
+    nullableAmount(body.maximumAmount);
 
   if (
     minimumAmount !== null &&
     maximumAmount !== null &&
     maximumAmount < minimumAmount
   ) {
-    throw new Error('O valor máximo não pode ser menor que o mínimo.');
+    throw new Error(
+      'O valor máximo não pode ser menor que o mínimo.'
+    );
   }
 
   return {
@@ -1256,17 +1753,27 @@ function normalizePartnerBody(body) {
     minimumAmount,
     maximumAmount,
     active: body.active !== false,
-    notifyOpportunities: body.notifyOpportunities !== false,
+    notifyOpportunities:
+      body.notifyOpportunities !== false,
     branches,
   };
 }
 
+/* =========================================================
+   VALIDAÇÃO DAS CONFIGURAÇÕES
+========================================================= */
+
 function splitAndValidateUfs(value) {
-  const ufs = uniqueStrings(value, { upper: true });
+  const ufs = uniqueStrings(
+    value,
+    { upper: true }
+  );
 
   for (const uf of ufs) {
     if (!UF_CODES.has(uf)) {
-      throw new Error(`UF inválida: ${uf}`);
+      throw new Error(
+        `UF inválida: ${uf}`
+      );
     }
   }
 
@@ -1277,10 +1784,16 @@ function parseSettingsUpdate(body, current) {
   const next = {};
 
   if ('recipientEmail' in body) {
-    const email = text(body.recipientEmail) || null;
+    const email =
+      text(body.recipientEmail) || null;
 
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw new Error('Informe um e-mail destinatário válido.');
+    if (
+      email &&
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+    ) {
+      throw new Error(
+        'Informe um e-mail destinatário válido.'
+      );
     }
 
     next.recipientEmail = email;
@@ -1302,10 +1815,19 @@ function parseSettingsUpdate(body, current) {
   }
 
   if ('modalities' in body) {
-    const modalities = stringsFromBody(body.modalities, []);
+    const modalities = stringsFromBody(
+      body.modalities,
+      []
+    );
 
-    if (modalities.some((value) => !/^\d+$/.test(value))) {
-      throw new Error('As modalidades devem ser informadas por códigos numéricos.');
+    if (
+      modalities.some(
+        (value) => !/^\d+$/.test(value)
+      )
+    ) {
+      throw new Error(
+        'As modalidades devem ser informadas por códigos numéricos.'
+      );
     }
 
     next.modalities = modalities;
@@ -1314,19 +1836,27 @@ function parseSettingsUpdate(body, current) {
   if ('daysAhead' in body) {
     const days = Number(body.daysAhead);
 
-    if (!Number.isInteger(days) || days < 1 || days > 90) {
-      throw new Error('O período de prospecção deve ficar entre 1 e 90 dias.');
+    if (
+      !Number.isInteger(days) ||
+      days < 1 ||
+      days > 90
+    ) {
+      throw new Error(
+        'O período de prospecção deve ficar entre 1 e 90 dias.'
+      );
     }
 
     next.daysAhead = days;
   }
 
   if ('minAmount' in body) {
-    next.minAmount = nullableAmount(body.minAmount);
+    next.minAmount =
+      nullableAmount(body.minAmount);
   }
 
   if ('maxAmount' in body) {
-    next.maxAmount = nullableAmount(body.maxAmount);
+    next.maxAmount =
+      nullableAmount(body.maxAmount);
   }
 
   if ('documentAlertDays' in body) {
@@ -1353,236 +1883,75 @@ function parseSettingsUpdate(body, current) {
     maximum !== null &&
     maximum < minimum
   ) {
-    throw new Error('O valor máximo não pode ser menor que o mínimo.');
+    throw new Error(
+      'O valor máximo não pode ser menor que o mínimo.'
+    );
   }
 
   return next;
 }
+
+/* =========================================================
+   REGISTRO DAS ROTAS E AGENDADORES
+========================================================= */
 
 export function registerAutomation({
   app,
   prisma,
   getDefaultCompany,
 }) {
-  // Rotas das preferências de automação.
-  app.get('/api/automation/settings', async (_req, res) => {
-    try {
-      const company = await getDefaultCompany();
-      const settings = await ensureSettings(prisma, company);
+  /*
+   * Fila por processo.
+   * Evita sobreposição entre a execução manual e o cron local
+   * neste processo Node.js.
+   */
+  let queue = Promise.resolve();
 
-      res.json({ settings });
-    } catch (error) {
-      console.error('Erro ao carregar preferências:', error);
+  function enqueue(operation) {
+    const current = queue.then(operation);
 
-      res.status(500).json({
-        error: 'Não foi possível carregar as configurações de automação.',
-      });
-    }
-  });
+    queue = current.catch((error) => {
+      console.error(
+        'Erro no agendador do Licita360:',
+        error
+      );
+    });
 
-  app.put('/api/automation/settings', async (req, res) => {
-    try {
-      const company = await getDefaultCompany();
-      const current = await ensureSettings(prisma, company);
-      const data = parseSettingsUpdate(req.body || {}, current);
+    return current;
+  }
 
-      const settings = await prisma.prospectingSettings.update({
-        where: { companyId: company.id },
-        data,
-      });
+  /*
+   * Executa as rotinas para todas as empresas cadastradas.
+   */
+  async function runAllCompanies({
+    dailyDigest = false,
+  } = {}) {
+    const companies =
+      await prisma.company.findMany();
 
-      res.json({
-        ok: true,
-        settings,
-      });
-    } catch (error) {
-      console.error('Erro ao salvar preferências:', error);
-
-      res.status(400).json({
-        error: text(error?.message, 'Não foi possível salvar as configurações.'),
-      });
-    }
-  });
-
-  // Rotas da carteira de empresas parceiras.
-  app.get('/api/partners', async (_req, res) => {
-    try {
-      const company = await getDefaultCompany();
-
-      const partners = await prisma.partnerCompany.findMany({
-        where: { ownerCompanyId: company.id },
-        include: { branches: true },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      res.json({ partners });
-    } catch (error) {
-      console.error('Erro ao listar parceiros:', error);
-
-      res.status(500).json({
-        error: 'Não foi possível carregar as empresas parceiras.',
-      });
-    }
-  });
-
-  app.post('/api/partners', async (req, res) => {
-    try {
-      const company = await getDefaultCompany();
-      const partnerData = normalizePartnerBody(req.body || {});
-      const { branches, ...fields } = partnerData;
-
-      const partner = await prisma.partnerCompany.create({
-        data: {
-          ...fields,
-          ownerCompanyId: company.id,
-          branches: {
-            create: branches.map((name) => ({ name })),
-          },
-        },
-        include: { branches: true },
-      });
-
-      res.status(201).json({ ok: true, partner });
-    } catch (error) {
-      console.error('Erro ao cadastrar parceiro:', error);
-
-      res.status(400).json({
-        error: text(error?.message, 'Não foi possível cadastrar a empresa parceira.'),
-      });
-    }
-  });
-
-  app.put('/api/partners/:id', async (req, res) => {
-    try {
-      const company = await getDefaultCompany();
-      const existing = await prisma.partnerCompany.findFirst({
-        where: {
-          id: req.params.id,
-          ownerCompanyId: company.id,
-        },
-      });
-
-      if (!existing) {
-        return res.status(404).json({
-          error: 'Empresa parceira não encontrada.',
-        });
-      }
-
-      const partnerData = normalizePartnerBody(req.body || {});
-      const { branches, ...fields } = partnerData;
-
-      const partner = await prisma.$transaction(async (tx) => {
-        await tx.partnerBranch.deleteMany({
-          where: { partnerId: existing.id },
-        });
-
-        return tx.partnerCompany.update({
-          where: { id: existing.id },
-          data: {
-            ...fields,
-            ...(branches.length
-              ? {
-                  branches: {
-                    create: branches.map((name) => ({ name })),
-                  },
-                }
-              : {}),
-          },
-          include: { branches: true },
-        });
-      });
-
-      return res.json({ ok: true, partner });
-    } catch (error) {
-      console.error('Erro ao atualizar parceiro:', error);
-
-      return res.status(400).json({
-        error: text(error?.message, 'Não foi possível atualizar a empresa parceira.'),
-      });
-    }
-  });
-
-  app.delete('/api/partners/:id', async (req, res) => {
-    try {
-      const company = await getDefaultCompany();
-
-      const result = await prisma.partnerCompany.deleteMany({
-        where: {
-          id: req.params.id,
-          ownerCompanyId: company.id,
-        },
-      });
-
-      if (!result.count) {
-        return res.status(404).json({
-          error: 'Empresa parceira não encontrada.',
-        });
-      }
-
-      return res.json({ ok: true });
-    } catch (error) {
-      console.error('Erro ao excluir parceiro:', error);
-
-      return res.status(500).json({
-        error: 'Não foi possível excluir a empresa parceira.',
-      });
-    }
-  });
-
-  // Teste de envio para o endereço configurado.
-  app.post('/api/automation/test-email', async (_req, res) => {
-    try {
-      const company = await getDefaultCompany();
-      const settings = await ensureSettings(prisma, company);
-
-      if (!settings.recipientEmail) {
-        return res.status(400).json({
-          error: 'Cadastre e salve o e-mail destinatário antes de testar.',
-        });
-      }
-
-      await sendEmail({
-        to: settings.recipientEmail,
-        subject: 'Licita360 — teste de envio de alertas',
-        html: `
-          <div style="font-family:Arial,sans-serif;line-height:1.5">
-            <h2>Teste de e-mail do Licita360</h2>
-            <p>O provedor aceitou esta mensagem de teste.</p>
-            <p>Os alertas automáticos dependem de suas preferências e da execução do servidor.</p>
-          </div>
-        `,
-      });
-
-      return res.json({
-        ok: true,
-        message: 'O provedor aceitou o e-mail de teste.',
-      });
-    } catch (error) {
-      console.error('Erro no teste de e-mail:', error);
-
-      return res.status(502).json({
-        error: text(error?.message, 'Não foi possível enviar o e-mail de teste.'),
-      });
-    }
-  });
-
-  async function runAllCompanies({ dailyDigest = false } = {}) {
-    const companies = await prisma.company.findMany();
     const results = [];
 
     for (const company of companies) {
       try {
-        results.push(await processCompany(
-          prisma,
-          company,
-          { dailyDigest }
-        ));
+        results.push(
+          await processCompany(
+            prisma,
+            company,
+            { dailyDigest }
+          )
+        );
       } catch (error) {
-        console.error(`Falha de automação em ${company.name}:`, error);
+        console.error(
+          `Falha de automação em ${company.name}:`,
+          error
+        );
 
         results.push({
           companyId: company.id,
-          error: text(error?.message, 'Erro desconhecido'),
+          error: text(
+            error?.message,
+            'Erro desconhecido'
+          ),
         });
       }
     }
@@ -1590,91 +1959,602 @@ export function registerAutomation({
     return results;
   }
 
-  // Uma fila impede que o agendamento e o botão manual iniciem
-  // a mesma rotina simultaneamente neste processo Node.js.
-  let queue = Promise.resolve();
+  /*
+   * IMPORTANTE:
+   * Esta função e as duas rotas seguintes ficam dentro
+   * de registerAutomation(), pois dependem de app,
+   * enqueue() e runAllCompanies().
+   *
+   * Não declarar uma segunda cópia delas fora daqui.
+   */
+  async function handleCronRequest(
+    req,
+    res,
+    dailyDigest = false
+  ) {
+    const secret = process.env.CRON_SECRET;
 
-  function enqueue(operation) {
-    const current = queue.then(operation);
+    const authorization =
+      req.get('authorization');
 
-    queue = current.catch((error) => {
-      console.error('Erro no agendador do Licita360:', error);
-    });
-
-    return current;
-  }
-
-  app.post('/api/automation/run', async (_req, res) => {
-    try {
-      const company = await getDefaultCompany();
-
-      const result = await enqueue(async () => {
-        return processCompany(
-          prisma,
-          company,
-          { forceProspecting: true }
-        );
-      });
-
-      res.json({
-        ok: true,
-        message: 'Execução manual concluída.',
-        result,
-      });
-    } catch (error) {
-      console.error('Erro na execução manual:', error);
-
-      res.status(500).json({
-        error: text(error?.message, 'Não foi possível executar a prospecção.'),
+    if (
+      !secret ||
+      authorization !== `Bearer ${secret}`
+    ) {
+      return res.status(401).json({
+        ok: false,
+        error: 'Não autorizado.',
       });
     }
-  });
 
-  const scheduleLocalCron = (...args) => {
-  if (process.env.VERCEL === '1') {
-    return null;
+    try {
+      const results = await enqueue(() =>
+        runAllCompanies({ dailyDigest })
+      );
+
+      const failures = results.filter(
+        (item) =>
+          item.error ||
+          Number(item.queryFailures || 0) > 0 ||
+          Boolean(item.dailyEmail?.error)
+      );
+
+      return res
+        .status(failures.length ? 500 : 200)
+        .json({
+          ok: failures.length === 0,
+          task: dailyDigest
+            ? 'daily'
+            : 'prospecting',
+          executedAt: new Date().toISOString(),
+          companyCount: results.length,
+          results,
+        });
+    } catch (error) {
+      console.error(
+        'Erro na execução agendada:',
+        error
+      );
+
+      return res.status(500).json({
+        ok: false,
+        error:
+          'Falha ao executar a rotina agendada.',
+      });
+    }
   }
 
-  return cron.schedule(...args);
-};
+  /*
+   * Rotas utilizadas pelo serviço externo de agendamento.
+   */
+  app.get(
+    '/api/cron/prospecting',
+    (req, res) =>
+      handleCronRequest(req, res, false)
+  );
 
+  app.get(
+    '/api/cron/daily',
+    (req, res) =>
+      handleCronRequest(req, res, true)
+  );
+
+  /* =======================================================
+     CONFIGURAÇÕES DA AUTOMAÇÃO
+  ======================================================= */
+
+  app.get(
+    '/api/automation/settings',
+    async (_req, res) => {
+      try {
+        const company =
+          await getDefaultCompany();
+
+        const settings =
+          await ensureSettings(
+            prisma,
+            company
+          );
+
+        return res.json({ settings });
+      } catch (error) {
+        console.error(
+          'Erro ao carregar preferências:',
+          error
+        );
+
+        return res.status(500).json({
+          error:
+            'Não foi possível carregar as configurações de automação.',
+        });
+      }
+    }
+  );
+
+  app.put(
+    '/api/automation/settings',
+    async (req, res) => {
+      try {
+        const company =
+          await getDefaultCompany();
+
+        const current =
+          await ensureSettings(
+            prisma,
+            company
+          );
+
+        const data = parseSettingsUpdate(
+          req.body || {},
+          current
+        );
+
+        const settings =
+          await prisma.prospectingSettings.update({
+            where: {
+              companyId: company.id,
+            },
+            data,
+          });
+
+        return res.json({
+          ok: true,
+          settings,
+        });
+      } catch (error) {
+        console.error(
+          'Erro ao salvar preferências:',
+          error
+        );
+
+        return res.status(400).json({
+          error: text(
+            error?.message,
+            'Não foi possível salvar as configurações.'
+          ),
+        });
+      }
+    }
+  );
+
+  /* =======================================================
+     CARTEIRA DE EMPRESAS PARCEIRAS
+  ======================================================= */
+
+  app.get(
+    '/api/partners',
+    async (_req, res) => {
+      try {
+        const company =
+          await getDefaultCompany();
+
+        const partners =
+          await prisma.partnerCompany.findMany({
+            where: {
+              ownerCompanyId: company.id,
+            },
+
+            include: {
+              branches: true,
+            },
+
+            orderBy: {
+              createdAt: 'desc',
+            },
+          });
+
+        return res.json({ partners });
+      } catch (error) {
+        console.error(
+          'Erro ao listar parceiros:',
+          error
+        );
+
+        return res.status(500).json({
+          error:
+            'Não foi possível carregar as empresas parceiras.',
+        });
+      }
+    }
+  );
+
+  app.post(
+    '/api/partners',
+    async (req, res) => {
+      try {
+        const company =
+          await getDefaultCompany();
+
+        const partnerData =
+          normalizePartnerBody(
+            req.body || {}
+          );
+
+        const {
+          branches,
+          ...fields
+        } = partnerData;
+
+        const partner =
+          await prisma.partnerCompany.create({
+            data: {
+              ...fields,
+
+              ownerCompanyId: company.id,
+
+              branches: {
+                create: branches.map(
+                  (name) => ({ name })
+                ),
+              },
+            },
+
+            include: {
+              branches: true,
+            },
+          });
+
+        return res
+          .status(201)
+          .json({
+            ok: true,
+            partner,
+          });
+      } catch (error) {
+        console.error(
+          'Erro ao cadastrar parceiro:',
+          error
+        );
+
+        return res.status(400).json({
+          error: text(
+            error?.message,
+            'Não foi possível cadastrar a empresa parceira.'
+          ),
+        });
+      }
+    }
+  );
+
+  app.put(
+    '/api/partners/:id',
+    async (req, res) => {
+      try {
+        const company =
+          await getDefaultCompany();
+
+        const existing =
+          await prisma.partnerCompany.findFirst({
+            where: {
+              id: req.params.id,
+              ownerCompanyId: company.id,
+            },
+          });
+
+        if (!existing) {
+          return res.status(404).json({
+            error:
+              'Empresa parceira não encontrada.',
+          });
+        }
+
+        const partnerData =
+          normalizePartnerBody(
+            req.body || {}
+          );
+
+        const {
+          branches,
+          ...fields
+        } = partnerData;
+
+        const partner =
+          await prisma.$transaction(
+            async (tx) => {
+              await tx.partnerBranch.deleteMany({
+                where: {
+                  partnerId: existing.id,
+                },
+              });
+
+              return tx.partnerCompany.update({
+                where: {
+                  id: existing.id,
+                },
+
+                data: {
+                  ...fields,
+
+                  ...(branches.length
+                    ? {
+                        branches: {
+                          create: branches.map(
+                            (name) => ({ name })
+                          ),
+                        },
+                      }
+                    : {}),
+                },
+
+                include: {
+                  branches: true,
+                },
+              });
+            }
+          );
+
+        return res.json({
+          ok: true,
+          partner,
+        });
+      } catch (error) {
+        console.error(
+          'Erro ao atualizar parceiro:',
+          error
+        );
+
+        return res.status(400).json({
+          error: text(
+            error?.message,
+            'Não foi possível atualizar a empresa parceira.'
+          ),
+        });
+      }
+    }
+  );
+
+  app.delete(
+    '/api/partners/:id',
+    async (req, res) => {
+      try {
+        const company =
+          await getDefaultCompany();
+
+        const result =
+          await prisma.partnerCompany.deleteMany({
+            where: {
+              id: req.params.id,
+              ownerCompanyId: company.id,
+            },
+          });
+
+        if (!result.count) {
+          return res.status(404).json({
+            error:
+              'Empresa parceira não encontrada.',
+          });
+        }
+
+        return res.json({
+          ok: true,
+        });
+      } catch (error) {
+        console.error(
+          'Erro ao excluir parceiro:',
+          error
+        );
+
+        return res.status(500).json({
+          error:
+            'Não foi possível excluir a empresa parceira.',
+        });
+      }
+    }
+  );
+
+  /* =======================================================
+     TESTE DE ENVIO DE E-MAIL
+  ======================================================= */
+
+  app.post(
+    '/api/automation/test-email',
+    async (_req, res) => {
+      try {
+        const company =
+          await getDefaultCompany();
+
+        const settings =
+          await ensureSettings(
+            prisma,
+            company
+          );
+
+        if (!settings.recipientEmail) {
+          return res.status(400).json({
+            error:
+              'Cadastre e salve o e-mail destinatário antes de testar.',
+          });
+        }
+
+        await sendEmail({
+          to: settings.recipientEmail,
+
+          subject:
+            'Licita360 — teste de envio de alertas',
+
+          html: `
+            <div style="font-family:Arial,sans-serif;line-height:1.5">
+              <h2>Teste de e-mail do Licita360</h2>
+
+              <p>
+                O provedor aceitou esta mensagem de teste.
+              </p>
+
+              <p>
+                Os alertas automáticos dependem das suas
+                preferências e da execução do servidor.
+              </p>
+            </div>
+          `,
+        });
+
+        return res.json({
+          ok: true,
+          message:
+            'O provedor aceitou o e-mail de teste.',
+        });
+      } catch (error) {
+        console.error(
+          'Erro no teste de e-mail:',
+          error
+        );
+
+        return res.status(502).json({
+          error: text(
+            error?.message,
+            'Não foi possível enviar o e-mail de teste.'
+          ),
+        });
+      }
+    }
+  );
+
+  /* =======================================================
+     EXECUÇÃO MANUAL DA PROSPECÇÃO
+  ======================================================= */
+
+  app.post(
+    '/api/automation/run',
+    async (_req, res) => {
+      try {
+        const company =
+          await getDefaultCompany();
+
+        const result = await enqueue(() =>
+          processCompany(
+            prisma,
+            company,
+            {
+              forceProspecting: true,
+            }
+          )
+        );
+
+        return res.json({
+          ok: true,
+          message:
+            'Execução manual concluída.',
+          result,
+        });
+      } catch (error) {
+        console.error(
+          'Erro na execução manual:',
+          error
+        );
+
+        return res.status(500).json({
+          error: text(
+            error?.message,
+            'Não foi possível executar a prospecção.'
+          ),
+        });
+      }
+    }
+  );
+
+  /* =======================================================
+     AGENDAMENTO LOCAL
+  ======================================================= */
+
+  const scheduleLocalCron = (...args) => {
+    /*
+     * O agendamento interno é desativado quando:
+     * - a aplicação está rodando na Vercel; ou
+     * - DISABLE_LOCAL_CRON=true.
+     *
+     * Isso evita que o cron interno concorra com o
+     * agendador externo configurado para chamar as rotas.
+     */
+    if (
+      process.env.VERCEL === '1' ||
+      process.env.DISABLE_LOCAL_CRON === 'true'
+    ) {
+      return null;
+    }
+
+    return cron.schedule(...args);
+  };
+
+  /*
+   * Prospecção automática a cada 30 minutos.
+   */
   const routineTask = scheduleLocalCron(
     '*/30 * * * *',
     () => {
       enqueue(() => runAllCompanies())
-        .catch((error) => console.error(error));
+        .catch((error) => {
+          console.error(
+            'Erro na prospecção agendada:',
+            error
+          );
+        });
     },
-    { timezone: TIME_ZONE }
+    {
+      timezone: TIME_ZONE,
+    }
   );
 
-  
+  /*
+   * Resumo diário às 08h, no fuso configurado.
+   */
   const dailyTask = scheduleLocalCron(
     '0 8 * * *',
     () => {
-      enqueue(() => runAllCompanies({ dailyDigest: true }))
-        .catch((error) => console.error(error));
+      enqueue(() =>
+        runAllCompanies({
+          dailyDigest: true,
+        })
+      ).catch((error) => {
+        console.error(
+          'Erro no resumo diário:',
+          error
+        );
+      });
     },
-    { timezone: TIME_ZONE }
+    {
+      timezone: TIME_ZONE,
+    }
   );
 
-  // Cria as preferências para a empresa padrão sem apagar seus dados.
+  /* =======================================================
+     INICIALIZAÇÃO
+  ======================================================= */
+
+  /*
+   * Cria as preferências da empresa padrão caso ainda
+   * não existam, sem apagar as configurações existentes.
+   */
   void (async () => {
     try {
-      const company = await getDefaultCompany();
-      await ensureSettings(prisma, company);
+      const company =
+        await getDefaultCompany();
+
+      await ensureSettings(
+        prisma,
+        company
+      );
 
       console.log(
-        'Automação do Licita360 preparada; prospecção a cada 30 minutos e resumo diário às 08:00.'
+        'Automação do Licita360 preparada; ' +
+        'prospecção a cada 30 minutos e ' +
+        'resumo diário às 08:00.'
       );
     } catch (error) {
-      console.error('Falha ao inicializar automação:', error);
+      console.error(
+        'Falha ao inicializar automação:',
+        error
+      );
     }
   })();
 
+  /*
+   * Permite interromper os agendadores locais quando
+   * a aplicação for encerrada.
+   */
   return {
-  stop() {
-    routineTask?.stop();
-    dailyTask?.stop();
-  },
-};
+    stop() {
+      routineTask?.stop();
+      dailyTask?.stop();
+    },
+  };
 }

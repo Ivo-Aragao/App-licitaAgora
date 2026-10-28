@@ -268,7 +268,8 @@ async function extractPdfText(file, onProgress) {
       onProgress?.(pageNumber, pagesToRead);
     }
   } finally {
-    await pdf.destroy();
+    // O destroy() pertence ao PDFDocumentLoadingTask, não ao documento PDF.
+    await loadingTask.destroy();
   }
 
   return {
