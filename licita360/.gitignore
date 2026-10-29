@@ -8,3 +8,6 @@ dist/
 public/
 .vercel
 .env*
+env.backup
+src/main.backup
+server/automation.backup
