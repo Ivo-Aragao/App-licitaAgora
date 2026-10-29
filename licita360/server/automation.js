@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import { createHash } from 'node:crypto';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
 const PNCP_BASE = 'https://pncp.gov.br/api/consulta';
 const TIME_ZONE = process.env.TZ || 'America/Fortaleza';
@@ -579,7 +579,7 @@ async function fetchPncpRecords({
 }
 
 /* =========================================================
-   ENVIO DE E-MAIL
+   ENVIO DE E-MAIL PELO RESEND
 ========================================================= */
 
 async function sendEmail({
@@ -587,43 +587,63 @@ async function sendEmail({
   subject,
   html,
 }) {
-  const user = process.env.GOOGLE_EMAIL;
-  const password = process.env.GOOGLE_APP_PASSWORD;
+  const apiKey = process.env.RESEND_API_KEY;
 
-  if (!user || !password) {
+  if (!apiKey) {
     throw new Error(
-      'Configure GOOGLE_EMAIL e GOOGLE_APP_PASSWORD no arquivo .env do backend.'
+      'Configure RESEND_API_KEY nas variáveis de ambiente do Render.'
     );
   }
 
   if (!to) {
-    throw new Error(
-      'Informe um e-mail destinatário.'
-    );
+    throw new Error('Informe um e-mail destinatário.');
   }
 
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    auth: {
-      user,
-      pass: password.replace(/\s/g, ''),
-    },
-  });
+  const resend = new Resend(apiKey);
 
-  const info = await transporter.sendMail({
-    from:
-      process.env.ALERT_FROM_EMAIL ||
-      `Licita360 <${user}>`,
-    to,
-    subject,
-    html,
-  });
+  const from =
+    process.env.ALERT_FROM_EMAIL ||
+    'Licita360 <onboarding@resend.dev>';
 
-  return {
-    messageId: info.messageId,
-  };
+  try {
+    const { data, error } = await resend.emails.send({
+      from,
+      to: [to],
+      subject,
+      html,
+    });
+
+    if (error) {
+      console.error('Erro retornado pelo Resend:', {
+        name: error.name,
+        message: error.message,
+        statusCode: error.statusCode,
+      });
+
+      throw new Error(
+        error.message || 'O Resend recusou o envio do e-mail.'
+      );
+    }
+
+    if (!data?.id) {
+      throw new Error(
+        'O Resend não retornou o identificador da mensagem.'
+      );
+    }
+
+    console.log('E-mail aceito pelo Resend:', data.id);
+
+    return {
+      messageId: data.id,
+    };
+  } catch (error) {
+    console.error(
+      'Falha na comunicação com o Resend:',
+      error?.message || error
+    );
+
+    throw error;
+  }
 }
 
 async function sendTrackedEmail(
@@ -1142,7 +1162,6 @@ async function matchPartnerOpportunities(
 
           newMatches += 1;
         } catch (error) {
-          // Evita duplicação em caso de execução simultânea.
           if (error?.code !== 'P2002') {
             throw error;
           }
@@ -1902,8 +1921,7 @@ export function registerAutomation({
 }) {
   /*
    * Fila por processo.
-   * Evita sobreposição entre a execução manual e o cron local
-   * neste processo Node.js.
+   * Evita sobreposição entre a execução manual e o cron local.
    */
   let queue = Promise.resolve();
 
@@ -1960,12 +1978,7 @@ export function registerAutomation({
   }
 
   /*
-   * IMPORTANTE:
-   * Esta função e as duas rotas seguintes ficam dentro
-   * de registerAutomation(), pois dependem de app,
-   * enqueue() e runAllCompanies().
-   *
-   * Não declarar uma segunda cópia delas fora daqui.
+   * Rotas de agendamento externo.
    */
   async function handleCronRequest(
     req,
@@ -1973,9 +1986,7 @@ export function registerAutomation({
     dailyDigest = false
   ) {
     const secret = process.env.CRON_SECRET;
-
-    const authorization =
-      req.get('authorization');
+    const authorization = req.get('authorization');
 
     if (
       !secret ||
@@ -1996,16 +2007,19 @@ export function registerAutomation({
         (item) =>
           item.error ||
           Number(item.queryFailures || 0) > 0 ||
-          Boolean(item.dailyEmail?.error)
+          Boolean(item.dailyEmail?.error) ||
+          (
+            item.dailyEmail?.sent === false &&
+            item.dailyEmail?.reason !==
+              'Resumo diário desativado ou sem destinatário.'
+          )
       );
 
       return res
         .status(failures.length ? 500 : 200)
         .json({
           ok: failures.length === 0,
-          task: dailyDigest
-            ? 'daily'
-            : 'prospecting',
+          task: dailyDigest ? 'daily' : 'prospecting',
           executedAt: new Date().toISOString(),
           companyCount: results.length,
           results,
@@ -2018,15 +2032,11 @@ export function registerAutomation({
 
       return res.status(500).json({
         ok: false,
-        error:
-          'Falha ao executar a rotina agendada.',
+        error: 'Falha ao executar a rotina agendada.',
       });
     }
   }
 
-  /*
-   * Rotas utilizadas pelo serviço externo de agendamento.
-   */
   app.get(
     '/api/cron/prospecting',
     (req, res) =>
@@ -2194,12 +2204,10 @@ export function registerAutomation({
             },
           });
 
-        return res
-          .status(201)
-          .json({
-            ok: true,
-            partner,
-          });
+        return res.status(201).json({
+          ok: true,
+          partner,
+        });
       } catch (error) {
         console.error(
           'Erro ao cadastrar parceiro:',
@@ -2233,8 +2241,7 @@ export function registerAutomation({
 
         if (!existing) {
           return res.status(404).json({
-            error:
-              'Empresa parceira não encontrada.',
+            error: 'Empresa parceira não encontrada.',
           });
         }
 
@@ -2320,14 +2327,11 @@ export function registerAutomation({
 
         if (!result.count) {
           return res.status(404).json({
-            error:
-              'Empresa parceira não encontrada.',
+            error: 'Empresa parceira não encontrada.',
           });
         }
 
-        return res.json({
-          ok: true,
-        });
+        return res.json({ ok: true });
       } catch (error) {
         console.error(
           'Erro ao excluir parceiro:',
@@ -2366,7 +2370,7 @@ export function registerAutomation({
           });
         }
 
-        await sendEmail({
+        const result = await sendEmail({
           to: settings.recipientEmail,
 
           subject:
@@ -2377,7 +2381,7 @@ export function registerAutomation({
               <h2>Teste de e-mail do Licita360</h2>
 
               <p>
-                O provedor aceitou esta mensagem de teste.
+                O Resend aceitou esta mensagem de teste.
               </p>
 
               <p>
@@ -2391,7 +2395,8 @@ export function registerAutomation({
         return res.json({
           ok: true,
           message:
-            'O provedor aceitou o e-mail de teste.',
+            'O Resend aceitou a mensagem. ID: ' +
+            result.messageId,
         });
       } catch (error) {
         console.error(
@@ -2432,8 +2437,7 @@ export function registerAutomation({
 
         return res.json({
           ok: true,
-          message:
-            'Execução manual concluída.',
+          message: 'Execução manual concluída.',
           result,
         });
       } catch (error) {
@@ -2457,14 +2461,6 @@ export function registerAutomation({
   ======================================================= */
 
   const scheduleLocalCron = (...args) => {
-    /*
-     * O agendamento interno é desativado quando:
-     * - a aplicação está rodando na Vercel; ou
-     * - DISABLE_LOCAL_CRON=true.
-     *
-     * Isso evita que o cron interno concorra com o
-     * agendador externo configurado para chamar as rotas.
-     */
     if (
       process.env.VERCEL === '1' ||
       process.env.DISABLE_LOCAL_CRON === 'true'
@@ -2475,9 +2471,6 @@ export function registerAutomation({
     return cron.schedule(...args);
   };
 
-  /*
-   * Prospecção automática a cada 30 minutos.
-   */
   const routineTask = scheduleLocalCron(
     '*/30 * * * *',
     () => {
@@ -2494,9 +2487,6 @@ export function registerAutomation({
     }
   );
 
-  /*
-   * Resumo diário às 08h, no fuso configurado.
-   */
   const dailyTask = scheduleLocalCron(
     '0 8 * * *',
     () => {
@@ -2520,10 +2510,6 @@ export function registerAutomation({
      INICIALIZAÇÃO
   ======================================================= */
 
-  /*
-   * Cria as preferências da empresa padrão caso ainda
-   * não existam, sem apagar as configurações existentes.
-   */
   void (async () => {
     try {
       const company =
@@ -2547,10 +2533,6 @@ export function registerAutomation({
     }
   })();
 
-  /*
-   * Permite interromper os agendadores locais quando
-   * a aplicação for encerrada.
-   */
   return {
     stop() {
       routineTask?.stop();
