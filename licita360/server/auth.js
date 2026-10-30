@@ -1,3 +1,4 @@
+
 import { createHash, randomBytes } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import bcrypt from 'bcryptjs';
@@ -18,6 +19,19 @@ const attempts = new Map();
 
 function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
+}
+
+// ==========================================
+// ADMINISTRADORES AUTORIZADOS
+// ==========================================
+
+function isConfiguredAdmin(email) {
+  const allowlist = String(process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+
+  return allowlist.includes(normalizeEmail(email));
 }
 
 function text(value, fallback = '') {
@@ -60,6 +74,7 @@ function cookieOptions(maxAgeSeconds) {
   ];
 
   if (process.env.NODE_ENV === 'production') parts.push('Secure');
+
   return parts.join('; ');
 }
 
@@ -76,19 +91,26 @@ function clearSessionCookie(res) {
   res.setHeader('Set-Cookie', cookieOptions(0));
 }
 
+// ==========================================
+// USUÁRIO PÚBLICO
+// ==========================================
+
 function publicUser(user) {
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     phone: user.phone || '',
-    role: user.role,
+    role: isConfiguredAdmin(user.email) ? 'ADMIN' : user.role,
+    status: user.status || 'ACTIVE',
+    lastLoginAt: user.lastLoginAt || null,
     companyId: user.companyId,
     company: user.company
       ? {
           id: user.company.id,
           name: user.company.name,
           uf: user.company.uf,
+          status: user.company.status || 'ACTIVE',
         }
       : undefined,
   };
@@ -113,6 +135,10 @@ function sendRateLimitError(res) {
     error: 'Muitas tentativas. Aguarde alguns minutos antes de tentar novamente.',
   });
 }
+
+// ==========================================
+// SESSÕES
+// ==========================================
 
 async function readSession(req, prisma) {
   const token = parseCookies(req)[COOKIE_NAME];
@@ -162,6 +188,10 @@ async function createSession(res, prisma, user, rememberMe = false) {
   setSessionCookie(res, token, maxAgeSeconds);
 }
 
+// ==========================================
+// VALIDAÇÕES
+// ==========================================
+
 function validatePassword(password) {
   if (typeof password !== 'string' || password.length < 8) {
     return 'A senha precisa ter pelo menos 8 caracteres.';
@@ -199,13 +229,20 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
+// ==========================================
+// E-MAIL DE RECUPERAÇÃO
+// ==========================================
+
 async function sendResetEmail({ to, name, resetUrl }) {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.ALERT_FROM_EMAIL;
 
   if (!apiKey || !from) {
     if (process.env.NODE_ENV !== 'production') {
-      console.info(`[Licita360 DEV] Link de redefinição para ${to}: ${resetUrl}`);
+      console.info(
+        `[Licita360 DEV] Link de redefinição para ${to}: ${resetUrl}`
+      );
+
       return { devMode: true };
     }
 
@@ -258,8 +295,16 @@ async function sendResetEmail({ to, name, resetUrl }) {
   return result;
 }
 
+// ==========================================
+// ROTAS DE AUTENTICAÇÃO
+// ==========================================
+
 export function registerAuthRoutes(app, prisma) {
-  // Cadastro
+
+  // ========================================
+  // CADASTRO
+  // ========================================
+
   app.post('/api/auth/register', async (req, res) => {
     if (!checkRateLimit(req, 'register', 5)) {
       return sendRateLimitError(res);
@@ -276,7 +321,9 @@ export function registerAuthRoutes(app, prisma) {
     const passwordError = validatePassword(body.password);
 
     if (!name || name.length < 2) {
-      return res.status(400).json({ error: 'Informe seu nome completo.' });
+      return res.status(400).json({
+        error: 'Informe seu nome completo.',
+      });
     }
 
     if (!companyName || companyName.length < 2) {
@@ -286,7 +333,9 @@ export function registerAuthRoutes(app, prisma) {
     }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: 'Informe um e-mail válido.' });
+      return res.status(400).json({
+        error: 'Informe um e-mail válido.',
+      });
     }
 
     if (cnpjDigits && cnpjDigits.length !== 14) {
@@ -296,15 +345,21 @@ export function registerAuthRoutes(app, prisma) {
     }
 
     if (!validUF(uf)) {
-      return res.status(400).json({ error: 'Selecione uma UF válida.' });
+      return res.status(400).json({
+        error: 'Selecione uma UF válida.',
+      });
     }
 
     if (passwordError) {
-      return res.status(400).json({ error: passwordError });
+      return res.status(400).json({
+        error: passwordError,
+      });
     }
 
     if (body.password !== body.confirmPassword) {
-      return res.status(400).json({ error: 'As senhas não correspondem.' });
+      return res.status(400).json({
+        error: 'As senhas não correspondem.',
+      });
     }
 
     if (body.acceptTerms !== true) {
@@ -324,11 +379,20 @@ export function registerAuthRoutes(app, prisma) {
         });
       }
 
+      // Impede que um visitante crie uma conta administrativa.
+      // A conta ADMIN deve ser criada por procedimento controlado.
+      if (isConfiguredAdmin(email)) {
+        return res.status(403).json({
+          error: 'Este e-mail está reservado para uma conta administrativa. Entre em contato com o responsável pelo Licita360.',
+        });
+      }
+
       const passwordHash = await bcrypt.hash(body.password, 12);
 
       const created = await prisma.$transaction(async (tx) => {
-        // Reaproveita a empresa padrão antiga, caso exista e ainda não
-        // esteja associada a nenhum usuário autenticado.
+
+        // Reaproveita a empresa padrão antiga, caso exista
+        // e ainda não esteja associada a nenhum usuário.
         const legacyCompany = await tx.company.findUnique({
           where: { id: 'licita360-default-company' },
           include: { users: true, branches: true },
@@ -359,6 +423,7 @@ export function registerAuthRoutes(app, prisma) {
               skipDuplicates: true,
             });
           }
+
         } else {
           company = await tx.company.create({
             data: {
@@ -393,6 +458,7 @@ export function registerAuthRoutes(app, prisma) {
         ok: true,
         user: publicUser(created),
       });
+
     } catch (error) {
       if (error?.code === 'P2002') {
         return res.status(409).json({
@@ -408,18 +474,26 @@ export function registerAuthRoutes(app, prisma) {
     }
   });
 
-  // Login
+  // ========================================
+  // LOGIN
+  // ========================================
+
   app.post('/api/auth/login', async (req, res) => {
     if (!checkRateLimit(req, 'login')) {
       return sendRateLimitError(res);
     }
 
     const email = normalizeEmail(req.body?.email);
+
     const password =
-      typeof req.body?.password === 'string' ? req.body.password : '';
+      typeof req.body?.password === 'string'
+        ? req.body.password
+        : '';
 
     if (!email || !password) {
-      return res.status(400).json({ error: 'Informe o e-mail e a senha.' });
+      return res.status(400).json({
+        error: 'Informe o e-mail e a senha.',
+      });
     }
 
     try {
@@ -429,15 +503,47 @@ export function registerAuthRoutes(app, prisma) {
       });
 
       if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-        return res.status(401).json({ error: 'E-mail ou senha inválidos.' });
+        return res.status(401).json({
+          error: 'E-mail ou senha inválidos.',
+        });
       }
 
-      await createSession(res, prisma, user, req.body?.rememberMe === true);
+      const configuredAdmin =
+        isConfiguredAdmin(user.email) || user.role === 'ADMIN';
+
+      if (user.status && user.status !== 'ACTIVE') {
+        return res.status(403).json({
+          error: 'Esta conta está suspensa. Entre em contato com o suporte.',
+        });
+      }
+
+      if (
+        user.company?.status === 'SUSPENDED' &&
+        !configuredAdmin
+      ) {
+        return res.status(403).json({
+          error: 'O acesso desta empresa está suspenso. Entre em contato com o suporte.',
+        });
+      }
+
+      const loggedUser = await prisma.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+        include: { company: true },
+      });
+
+      await createSession(
+        res,
+        prisma,
+        loggedUser,
+        req.body?.rememberMe === true
+      );
 
       return res.json({
         ok: true,
-        user: publicUser(user),
+        user: publicUser(loggedUser),
       });
+
     } catch (error) {
       console.error('Erro no login:', error);
 
@@ -447,7 +553,10 @@ export function registerAuthRoutes(app, prisma) {
     }
   });
 
-  // Verifica a sessão atual
+  // ========================================
+  // VERIFICAR SESSÃO ATUAL
+  // ========================================
+
   app.get('/api/auth/me', async (req, res) => {
     try {
       const session = await readSession(req, prisma);
@@ -460,9 +569,35 @@ export function registerAuthRoutes(app, prisma) {
         });
       }
 
+      const authenticatedUser = publicUser(session.user);
+
+      if (authenticatedUser.status !== 'ACTIVE') {
+        await prisma.authSession.deleteMany({
+          where: { userId: session.userId },
+        });
+
+        clearSessionCookie(res);
+
+        return res.status(403).json({
+          error: 'Esta conta está suspensa.',
+        });
+      }
+
+      if (
+        authenticatedUser.company?.status === 'SUSPENDED' &&
+        authenticatedUser.role !== 'ADMIN'
+      ) {
+        clearSessionCookie(res);
+
+        return res.status(403).json({
+          error: 'O acesso desta empresa está suspenso.',
+        });
+      }
+
       return res.json({
-        user: publicUser(session.user),
+        user: authenticatedUser,
       });
+
     } catch (error) {
       console.error('Erro ao verificar a sessão:', error);
 
@@ -472,7 +607,10 @@ export function registerAuthRoutes(app, prisma) {
     }
   });
 
-  // Logout
+  // ========================================
+  // LOGOUT
+  // ========================================
+
   app.post('/api/auth/logout', async (req, res) => {
     try {
       const token = parseCookies(req)[COOKIE_NAME];
@@ -484,9 +622,12 @@ export function registerAuthRoutes(app, prisma) {
       }
 
       clearSessionCookie(res);
+
       return res.json({ ok: true });
+
     } catch (error) {
       console.error('Erro ao encerrar sessão:', error);
+
       clearSessionCookie(res);
 
       return res.status(500).json({
@@ -495,7 +636,10 @@ export function registerAuthRoutes(app, prisma) {
     }
   });
 
-  // Solicita recuperação de senha
+  // ========================================
+  // SOLICITAR RECUPERAÇÃO DE SENHA
+  // ========================================
+
   app.post('/api/auth/forgot-password', async (req, res) => {
     if (!checkRateLimit(req, 'forgot-password', 5)) {
       return sendRateLimitError(res);
@@ -504,7 +648,9 @@ export function registerAuthRoutes(app, prisma) {
     const email = normalizeEmail(req.body?.email);
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: 'Informe um e-mail válido.' });
+      return res.status(400).json({
+        error: 'Informe um e-mail válido.',
+      });
     }
 
     const genericMessage =
@@ -516,12 +662,18 @@ export function registerAuthRoutes(app, prisma) {
       });
 
       if (!user) {
-        return res.json({ ok: true, message: genericMessage });
+        return res.json({
+          ok: true,
+          message: genericMessage,
+        });
       }
 
       const token = randomBytes(32).toString('base64url');
       const tokenHash = sha256(token);
-      const expiresAt = new Date(Date.now() + RESET_MINUTES * 60 * 1000);
+
+      const expiresAt = new Date(
+        Date.now() + RESET_MINUTES * 60 * 1000
+      );
 
       await prisma.passwordResetToken.updateMany({
         where: { userId: user.id, usedAt: null },
@@ -540,7 +692,9 @@ export function registerAuthRoutes(app, prisma) {
         process.env.FRONTEND_URL || 'http://localhost:5173'
       ).replace(/\/$/, '');
 
-      const resetUrl = `${frontendUrl}/?reset=${encodeURIComponent(token)}`;
+      const resetUrl =
+        `${frontendUrl}/?reset=${encodeURIComponent(token)}`;
+
       let devResetUrl;
 
       try {
@@ -550,11 +704,18 @@ export function registerAuthRoutes(app, prisma) {
           resetUrl,
         });
 
-        if (result.devMode && process.env.NODE_ENV !== 'production') {
+        if (
+          result.devMode &&
+          process.env.NODE_ENV !== 'production'
+        ) {
           devResetUrl = resetUrl;
         }
+
       } catch (error) {
-        console.error('Falha no envio de recuperação de senha:', error);
+        console.error(
+          'Falha no envio de recuperação de senha:',
+          error
+        );
 
         if (process.env.NODE_ENV !== 'production') {
           devResetUrl = resetUrl;
@@ -566,39 +727,57 @@ export function registerAuthRoutes(app, prisma) {
         message: genericMessage,
         ...(devResetUrl ? { devResetUrl } : {}),
       });
+
     } catch (error) {
       console.error('Erro na solicitação de redefinição:', error);
 
       // Não informa ao solicitante se o e-mail está cadastrado.
-      return res.json({ ok: true, message: genericMessage });
+      return res.json({
+        ok: true,
+        message: genericMessage,
+      });
     }
   });
 
-  // Redefine a senha com o token recebido
+  // ========================================
+  // REDEFINIR SENHA
+  // ========================================
+
   app.post('/api/auth/reset-password', async (req, res) => {
     if (!checkRateLimit(req, 'reset-password', 8)) {
       return sendRateLimitError(res);
     }
 
     const token = text(req.body?.token);
+
     const password =
-      typeof req.body?.password === 'string' ? req.body.password : '';
+      typeof req.body?.password === 'string'
+        ? req.body.password
+        : '';
+
     const confirmPassword =
       typeof req.body?.confirmPassword === 'string'
         ? req.body.confirmPassword
         : '';
+
     const passwordError = validatePassword(password);
 
     if (!token) {
-      return res.status(400).json({ error: 'Link de redefinição inválido.' });
+      return res.status(400).json({
+        error: 'Link de redefinição inválido.',
+      });
     }
 
     if (passwordError) {
-      return res.status(400).json({ error: passwordError });
+      return res.status(400).json({
+        error: passwordError,
+      });
     }
 
     if (password !== confirmPassword) {
-      return res.status(400).json({ error: 'As senhas não correspondem.' });
+      return res.status(400).json({
+        error: 'As senhas não correspondem.',
+      });
     }
 
     try {
@@ -640,7 +819,10 @@ export function registerAuthRoutes(app, prisma) {
         });
 
         await tx.passwordResetToken.updateMany({
-          where: { userId: reset.userId, usedAt: null },
+          where: {
+            userId: reset.userId,
+            usedAt: null,
+          },
           data: { usedAt: new Date() },
         });
       });
@@ -651,6 +833,7 @@ export function registerAuthRoutes(app, prisma) {
         ok: true,
         message: 'Senha redefinida com sucesso. Entre usando a nova senha.',
       });
+
     } catch (error) {
       if (error?.message === 'RESET_TOKEN_ALREADY_USED') {
         return res.status(400).json({
@@ -666,20 +849,54 @@ export function registerAuthRoutes(app, prisma) {
     }
   });
 
-  // Middleware para proteger as rotas privadas.
+  // ========================================
+  // MIDDLEWARE DE AUTENTICAÇÃO
+  // ========================================
+
   return async function requireAuth(req, res, next) {
     try {
       const session = await readSession(req, prisma);
 
       if (!session) {
         clearSessionCookie(res);
-        return res.status(401).json({ error: 'Faça login para continuar.' });
+
+        return res.status(401).json({
+          error: 'Faça login para continuar.',
+        });
       }
 
-      req.user = publicUser(session.user);
+      const authenticatedUser = publicUser(session.user);
+
+      // Bloqueia usuários suspensos.
+      if (authenticatedUser.status !== 'ACTIVE') {
+        await prisma.authSession.deleteMany({
+          where: { userId: session.userId },
+        });
+
+        clearSessionCookie(res);
+
+        return res.status(403).json({
+          error: 'Esta conta está suspensa.',
+        });
+      }
+
+      // Bloqueia empresas suspensas, exceto administradores.
+      if (
+        authenticatedUser.company?.status === 'SUSPENDED' &&
+        authenticatedUser.role !== 'ADMIN'
+      ) {
+        clearSessionCookie(res);
+
+        return res.status(403).json({
+          error: 'O acesso desta empresa está suspenso.',
+        });
+      }
+
+      req.user = authenticatedUser;
       req.authSessionId = session.id;
 
       return authContext.run(req.user, () => next());
+
     } catch (error) {
       console.error('Erro no middleware de autenticação:', error);
 

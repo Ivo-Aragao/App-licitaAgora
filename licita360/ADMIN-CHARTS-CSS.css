@@ -1,0 +1,7 @@
+/* Acrescente estas regras ao final de src/features/admin/AdminApp.css. */
+.l360-admin-chart-list { display: grid; gap: 13px; }
+.l360-admin-chart-row { display: grid; gap: 6px; }
+.l360-admin-chart-label { display: flex; justify-content: space-between; gap: 12px; color: var(--admin-muted); font-size: 11px; }
+.l360-admin-chart-label strong { color: var(--admin-ink); }
+.l360-admin-chart-track { height: 9px; overflow: hidden; border-radius: 999px; background: #edf1f7; }
+.l360-admin-chart-fill { height: 100%; border-radius: inherit; background: var(--admin-primary); }

@@ -9,6 +9,8 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { getCurrentAuthUser, registerAuthRoutes } from './auth.js';
 import { registerAutomation } from './automation.js';
+import { requireAdmin } from './admin/admin.middleware.js';
+import { registerAdminRoutes } from './admin/admin.routes.js';
 
 if (!process.env.DATABASE_URL) {
   throw new Error(
@@ -40,6 +42,7 @@ const LEGACY_FILE = join(
 const DEFAULT_COMPANY_ID = 'licita360-default-company';
 
 app.use(express.json({ limit: '2mb' }));
+
 // Registra login, cadastro, sessão e recuperação de senha.
 const requireAuth = registerAuthRoutes(app, prisma);
 
@@ -47,6 +50,10 @@ const requireAuth = registerAuthRoutes(app, prisma);
 app.use('/api/data', requireAuth);
 app.use('/api/partners', requireAuth);
 app.use('/api/automation', requireAuth);
+
+// Protege as rotas administrativas.
+// Primeiro autentica o usuário, depois verifica se é ADMIN.
+app.use('/api/admin', requireAuth, requireAdmin);
 
 function toNullableDate(value) {
   if (!value) return null;
@@ -786,16 +793,32 @@ app.get('/api/pncp/propostas', async (req, res) => {
   }
 });
 
+// ==========================================
+// AUTOMAÇÃO
+// ==========================================
+
 const automation = registerAutomation({
   app,
   prisma,
   getDefaultCompany,
 });
 
+// ==========================================
+// ROTAS ADMINISTRATIVAS
+// ==========================================
+
+// Registra as rotas administrativas.
+// O caminho /api/admin já está protegido por requireAuth e requireAdmin.
+registerAdminRoutes({ app, prisma });
+
+// ==========================================
+// INICIALIZAÇÃO DO SERVIDOR
+// ==========================================
+
 if (process.env.VERCEL !== '1') {
   const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Licita360 API disponível na porta ${PORT}`);
-});
+    console.log(`Licita360 API disponível na porta ${PORT}`);
+  });
 
   async function shutdown() {
     automation.stop();

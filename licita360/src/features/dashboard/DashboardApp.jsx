@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-
+import AdminApp from '../admin/AdminApp.jsx';
 import {
   Activity, AlertCircle, ArrowRight, ArrowUpRight, Bell,
   BriefcaseBusiness, CalendarClock, Check, CheckCheck, CheckCircle2,
@@ -284,12 +284,13 @@ export default function DashboardApp({ currentUser, onLogout }) {
     [data.opportunities, query, statusFilter]
   );
 
-  function showPage(id) {
-    setPage(id);
-    setSidebarOpen(false);
-    setQuery('');
-    setStatusFilter('Todos');
-  }
+ function showPage(id) {
+  if (id === 'admin' && currentUser?.role !== 'ADMIN') return;
+  setPage(id);
+  setSidebarOpen(false);
+  setQuery('');
+  setStatusFilter('Todos');
+}
 
   function saveOpportunity(form) {
     const normalized = {
@@ -729,6 +730,17 @@ export default function DashboardApp({ currentUser, onLogout }) {
           <ChevronDown size={16} className="muted-icon" />
         </div>
 
+        {currentUser?.role === 'ADMIN' && (
+              <button
+                className={`nav-link ${page === 'admin' ? 'active' : ''}`}
+                onClick={() => showPage('admin')}
+                type="button"
+              >
+                <ShieldCheck size={18} />
+                <span>Painel administrativo</span>
+              </button>
+            )}
+
         {['WORKSPACE', 'COMERCIAL', 'GESTÃO', 'FERRAMENTAS'].map((group) => (
           <div className="nav-group" key={group}>
             <div className="nav-label">{group}</div>
@@ -811,7 +823,9 @@ export default function DashboardApp({ currentUser, onLogout }) {
             <div className="breadcrumbs">
               Workspace <ChevronRight size={14} />
               <strong>
-                {nav.find((item) => item.id === page)?.label || 'Visão geral'}
+                {page === 'admin'
+                  ? 'Painel administrativo'
+                  : (nav.find((item) => item.id === page)?.label || 'Visão geral')}
               </strong>
             </div>
           </div>
@@ -849,6 +863,14 @@ export default function DashboardApp({ currentUser, onLogout }) {
         </header>
 
         <div className="page-content">
+          {page === 'admin' && currentUser?.role === 'ADMIN' && (
+            <AdminApp
+              currentUser={currentUser}
+              onBack={() => showPage('overview')}
+              onLogout={onLogout}
+            />
+          )}
+
           {page === 'overview' && (
             <Overview
               data={data}
